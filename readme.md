@@ -1,10 +1,6 @@
-[![SWUbanner](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/banner-direct.svg)](https://github.com/vshymanskyy/StandWithUkraine/blob/main/docs/README.md)
-
 # Teampass 3
 
 Teampass is a Collaborative Passwords Manager solution installed On-Premise.
-
-[![StandWithUkraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://github.com/vshymanskyy/StandWithUkraine/blob/main/docs/README.md)
 
 ![](https://img.shields.io/github/stars/nilsteampassnet/TeamPass?style=social)
 ![](https://img.shields.io/github/license/nilsteampassnet/teampass)
