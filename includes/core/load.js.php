@@ -59,7 +59,7 @@ $request = SymfonyRequest::createFromGlobals();
 
 <script type="text/javascript">
     var userScrollPosition = 0,
-        debugJavascript = true;
+        debugJavascript = false;
     let hourInMinutes = 60;
 
 
@@ -75,6 +75,14 @@ $request = SymfonyRequest::createFromGlobals();
         if (window.history.replaceState) {
             window.history.replaceState(null, null, window.location.href);
         }
+
+        // Check theme on page load
+        applyTheme(false);
+        
+        // Switch light/dark theme button
+        $('#switch-theme').on('click', function() {
+            applyTheme(true);
+        });
     });
 
     /**
@@ -205,6 +213,28 @@ $request = SymfonyRequest::createFromGlobals();
 
                             // Show form
                             $('#dialog-ldap-user-change-password').removeClass('hidden');
+
+                            if (data.queryResults.auth_type === 'oauth2') {
+                                // LDAP or local account to OAuth2 account
+                                var info_message = '<?php echo $lang->get('oauth2_need_user_old_password');?>';
+
+                                // Hide the "new password" field that users can't fill in manually
+                                $('#new-password-field').hide();
+
+                                // Auto-fill this hidden field.
+                                let oauth2_encryption_hash = CryptoJS.SHA256(store.get('teampassUser').login)
+                                                                     .toString(CryptoJS.enc.Hex)
+                                                                     .substring(0, 16);
+                                $('#dialog-ldap-user-change-password-current').val(oauth2_encryption_hash);
+                            } else {
+                                // LDAP password updated
+                                var info_message = '<?php echo $lang->get('ldap_user_has_changed_his_password');?>';
+                            }
+
+                            // Display info tip
+                            $('#dialog-ldap-user-change-password-info')
+                                .html('<i class="icon fa-solid fa-info mr-2"></i>' + info_message)
+                                .removeClass('hidden');
                         } else if (typeof data.queryResults !== 'undefined' && data.queryResults.keys_recovery_time === null && store.get('teampassUser').user_admin === 0) {
                             // User has not yet recovered his keys
                             $('#open_user_keys_management').removeClass('hidden');
@@ -279,6 +309,20 @@ $request = SymfonyRequest::createFromGlobals();
                             );
                         }
                     );
+                }
+
+                // Is the user password expired?
+                if (store.get('teampassUser').validite_pw !== 1) {                    
+                    // HIde
+                    $('.content-header, .content, #button_do_user_change_password').addClass('hidden');
+
+                    // Add DoCheck button
+                    $('#button_do_user_change_password').after('<button class="btn btn-primary" id="button_do_pwds_checks"><?php echo $lang->get('perform_checks'); ?></button>');
+
+                    // Show passwords inputs and form
+                    $('#dialog-user-change-password-info').html('<i class="icon fa-solid fa-info mr-2"></i><?php echo $lang->get('user_password_expired'); ?>').removeClass('hidden');
+                    $('#dialog-user-change-password-progress').html('<i class="icon fa-solid fa-info mr-2"></i><?php echo $lang->get('change_your_password_info_message'); ?>');
+                    $('#dialog-user-change-password').removeClass('hidden');
                 }
             });
         });
@@ -551,12 +595,13 @@ $request = SymfonyRequest::createFromGlobals();
                         '<?php echo $lang->get('generate_new_keys_info'); ?>' +
                     '</div>' +
                     '<div class="hidden" id="new-encryption-div">' +
-                        '<div class="row">' +
+                     
+                        '<div class="row'+((store.get('teampassUser').auth_type !== 'ldap' && store.get('teampassUser').auth_type !== 'oauth2') ? '' : ' hidden') + '">' +
                             '<div class="input-group mb-2">' +
                                 '<div class="input-group-prepend">' +
                                     '<span class="input-group-text"><?php echo $lang->get('confirm_password'); ?></span>' +
                                 '</div>' +
-                                '<input id="encryption-otp" type="password" class="form-control form-item-control" value="'+store.get('teampassUser').pwd+'">' +
+                                '<input id="encryption-otp" type="password" class="form-control form-item-control">' +
                                 '<div class="input-group-append">' +
                                     '<button class="btn btn-outline-secondary btn-no-click" id="show-encryption-otp" title="<?php echo $lang->get('mask_pw'); ?>"><i class="fa-solid fa-low-vision"></i></button>' +
                                 '</div>' +
@@ -632,8 +677,7 @@ $request = SymfonyRequest::createFromGlobals();
                     } else if ($('#warningModalButtonAction').attr('data-button-confirm') === 'true') {
                         // As reencryption relies on user's password
                         // ensure we have it
-                        if ($('#encryption-otp').val() === '' || 
-                            ($('#recovery-public-key').val() === '' || $('#recovery-private-key').val() === '') && $('#confirm-no-recovery-keys').prop('checked') === false
+                        if (($('#recovery-public-key').val() === '' || $('#recovery-private-key').val() === '') && $('#confirm-no-recovery-keys').prop('checked') === false
                         ) {
                             // No user password provided
                             $('#warningModalButtonAction')
@@ -650,7 +694,6 @@ $request = SymfonyRequest::createFromGlobals();
                             // update the process
                             // add all tasks
                             var parameters = {
-                                'user_id': parseInt(store.get('teampassUser').user_id),
                                 'user_pwd': $('#encryption-otp').val(),
                                 'encryption_key': '',
                                 'delete_existing_keys': true,
@@ -830,69 +873,6 @@ $request = SymfonyRequest::createFromGlobals();
         $('.content-header, .content').removeClass('hidden');
     });
 
-    /**
-     * When clicking save Personal saltkey
-     */
-    /*
-    $('#button_save_user_psk').click(function() {
-        toastr.remove();
-        toastr.info(
-            '<?php echo $lang->get('in_progress'); ?><i class="fa-solid fa-circle-notch fa-spin fa-2x ml-3"></i>'
-        );
-
-        // Prepare data
-        var data = {
-            "psk": sanitizeString($("#user_personal_saltkey").val()),
-            "complexity": $("#psk_strength_value").val()
-        };
-
-        //
-        $.post(
-            "sources/main.queries.php", {
-                type: "store_personal_saltkey",
-                data: prepareExchangedData(JSON.stringify(data), "encode", "<?php echo $session->get('key'); ?>"),
-                key: '<?php echo $session->get('key'); ?>'
-            },
-            function(data) {
-                data = prepareExchangedData(data, '<?php echo $session->get('key'); ?>');
-
-                // Is there an error?
-                if (data.error === true) {
-                    toastr.remove();
-                    toastr.error(
-                        '<?php echo $lang->get('warning'); ?>',
-                        '<?php echo $lang->get('caution'); ?>', {
-                            timeOut: 5000,
-                            progressBar: true
-                        }
-                    );
-                } else {
-                    store.update(
-                        'teampassUser',
-                        function(teampassUser) {
-                            teampassUser.pskDefinedInDatabase = 1;
-                        }
-                    )
-
-                    store.update(
-                        'teampassUser',
-                        function(teampassUser) {
-                            teampassUser.pskSetForSession = data.encrypted_psk;
-                        }
-                    )
-
-                    toastr.remove();
-                    toastr.success(
-                        '<?php echo $lang->get('alert_page_will_reload'); ?>'
-                    );
-
-                    location.reload();
-                }
-            }
-        );
-    });
-    */
-
     // For Personal Saltkey
     $("#profile-password").simplePassMeter({
         "requirements": {},
@@ -1059,6 +1039,15 @@ $request = SymfonyRequest::createFromGlobals();
                     } else {
                         // SUCCESS
                         $('#dialog-user-change-password-close').removeAttr('disabled');
+
+                        // update local storage
+                        store.update(
+                                'teampassUser', {},
+                                function(teampassUser) {
+                                    teampassUser.validite_pw = 1;
+                                }
+                            );
+
                         toastr.remove();
                         toastr.success(
                             data.message,
@@ -1506,7 +1495,7 @@ $request = SymfonyRequest::createFromGlobals();
                                 );
 
                                 // refresh the page
-                                window.location.href = 'index.php?page=items';
+                                window.location.href = './index.php?page=items';
                             }
                         }
                     );
@@ -1647,7 +1636,7 @@ $request = SymfonyRequest::createFromGlobals();
                         '<?php echo $lang->get('caution'); ?>', {
                             timeOut: 5000,
                             progressBar: true,
-                            positionClass: "toast-top-right"
+                            positionClass: "toast-bottom-right"
                         }
                     );
                     return false;
@@ -1974,7 +1963,7 @@ $request = SymfonyRequest::createFromGlobals();
         if (urlParams.get('page') === 'items') {
             // go back to list
             // Play with show and hide classes
-            $('.form-item, .form-item-action, .form-folder-action, .item-details-card, .columns-position, #item-details-card-categories, #form-item-upload-pickfilesList, #card-item-expired')
+            $('.form-item, .form-item-action, .form-folder-action, .columns-position, #item-details-card-categories, #form-item-upload-pickfilesList, #card-item-expired')
                 .addClass('hidden');
             $('#folders-tree-card').removeClass('hidden');
 
@@ -2062,5 +2051,68 @@ $request = SymfonyRequest::createFromGlobals();
                 }
             }
         );
+    }
+
+    /**
+     * Switch betwen light and dark themes.
+     * 
+     * @param {bool} switch_theme
+     */
+    function applyTheme(switch_theme) {
+        // Read actual theme (default = light)
+        let mode = $.cookie('teampass_theme') !== null ? $.cookie('teampass_theme') : 'light';
+
+        // Switch mode value if page loading
+        if (switch_theme) {
+            mode = (mode === 'dark') ? 'light' : 'dark'
+        }
+
+        if (mode === 'dark') {
+            // Meta theme-color (titlebar)
+            $('meta[name="theme-color"]').attr('content', '#343a40');
+
+            // Adminlte dark theme
+            $('body').addClass('dark-mode');
+            $('html').data('bs-theme', 'dark');
+
+            // jstree dark theme
+            $('#jstree').addClass('jstree-default-dark');
+
+            // Overload .main-header color
+            $('.main-header').removeClass('navbar-white navbar-light');
+            $('.main-header').addClass('navbar-dark');
+
+            // overload tp-action buttons
+            $('#navbarNav .tp-action').removeClass('text-navy');
+            $('#navbarNav .tp-action').addClass('text-white');
+            
+            // Overload buttons
+            $('.btn-outline-info').addClass('bg-gray-dark');
+            $('.card-header btn').addClass('bg-gray');
+        } else {
+            // Meta theme-color (titlebar)
+            $('meta[name="theme-color"]').attr('content', '#fff');
+
+            // Adminlte light theme
+            $('body').removeClass('dark-mode');
+            
+            // jstree dark theme
+            $('#jstree').removeClass('jstree-default-dark');
+            
+            // Restore .main-header default classes
+            $('.main-header').removeClass('navbar-dark');
+            $('.main-header').addClass('navbar-white navbar-light');
+            
+            // overload item-form-new-button buttons
+            $('#navbarNav .tp-action').addClass('text-navy');
+            $('#navbarNav .tp-action').removeClass('text-white');
+
+            // Overload buttons
+            $('.btn-outline-info').removeClass('bg-gray-dark');
+            $('.card-header btn').removeClass('bg-gray');
+        }
+
+        // Store new theme value
+        $.cookie('teampass_theme', mode, { expires: 365, secure: true});
     }
 </script>

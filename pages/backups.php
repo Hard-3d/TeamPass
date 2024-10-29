@@ -30,7 +30,7 @@ declare(strict_types=1);
  */
 
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\PerformChecks\PerformChecks;
@@ -41,13 +41,11 @@ require_once __DIR__.'/../sources/main.functions.php';
 
 // init
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 loadClasses('DB');
-$session = SessionManager::getSession();
-$request = Request::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -141,7 +139,7 @@ $localEncryptionKey = isset($SETTINGS['bck_script_passkey']) === true ?
                                                     <div class="input-group mb-0">
                                                         <input type="text" class="form-control form-control-sm" id="onthefly-backup-key" value="<?php echo $localEncryptionKey; ?>">
                                                         <div class="input-group-append">
-                                                            <button class="btn btn-outline-secondary btn-no-click infotip key-generate" title="<?php echo $lang->get('pw_generate'); ?>"><i class="fas fa-random"></i></button>
+                                                            <button class="btn btn-secondary btn-no-click infotip key-generate" title="<?php echo $lang->get('pw_generate'); ?>"><i class="fas fa-random"></i></button>
                                                         </div>
                                                     </div>
                                                 </div>

@@ -31,7 +31,7 @@ declare(strict_types=1);
 
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
@@ -42,10 +42,10 @@ require_once 'main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -65,17 +65,6 @@ $checkUserAccess = new PerformChecks(
         'user_key' => returnIfSet($session->get('key'), null),
     ]
 );
-// Handle the case
-echo $checkUserAccess->caseHandler();
-if (
-    $checkUserAccess->userAccessPage('folders') === false ||
-    $checkUserAccess->checkSession() === false
-) {
-    // Not allowed page
-    $session->set('system-error_code', ERR_NOT_ALLOWED);
-    include $SETTINGS['cpassman_dir'] . '/error.php';
-    exit;
-}
 
 // Define Timezone
 date_default_timezone_set(isset($SETTINGS['timezone']) === true ? $SETTINGS['timezone'] : 'UTC');
@@ -202,7 +191,11 @@ if (null !== $post_type) {
                         $arrayColumns['folderComplexity'] = '';
                     }
 
-                    $arrayColumns['renewalPeriod'] = (int) is_null($node_data) === false ? $node_data['renewal_period'] : 0;
+                    if (is_null($node_data)=== false) {
+                        $arrayColumns['renewalPeriod'] = (int) $node_data['renewal_period'];
+                    } else {
+                        $arrayColumns['renewalPeriod']=0;
+                    }
 
                     //col7
                     $data7 = DB::queryFirstRow(
@@ -317,22 +310,42 @@ if (null !== $post_type) {
             );
 
             // prepare variables
-            $post_title = filter_var($dataReceived['title'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_parent_id = filter_var($dataReceived['parentId'], FILTER_SANITIZE_NUMBER_INT);
-            $post_complexity = filter_var($dataReceived['complexity'], FILTER_SANITIZE_NUMBER_INT);
-            $post_folder_id = filter_var($dataReceived['id'], FILTER_SANITIZE_NUMBER_INT);
-            $post_renewal_period = isset($dataReceived['renewalPeriod']) === true ? filter_var($dataReceived['renewalPeriod'], FILTER_SANITIZE_NUMBER_INT) : -1;
-            $post_add_restriction = isset($dataReceived['addRestriction']) === true ? filter_var($dataReceived['addRestriction'], FILTER_SANITIZE_NUMBER_INT) : -1;
-            $post_edit_restriction = isset($dataReceived['editRestriction']) === true ? filter_var($dataReceived['editRestriction'], FILTER_SANITIZE_NUMBER_INT) : -1;
-            $post_icon = filter_var($dataReceived['icon'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_icon_selected = filter_var($dataReceived['iconSelected'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+            $data = [
+                'id' => isset($dataReceived['id']) === true ? $dataReceived['id'] : -1,
+                'title' => isset($dataReceived['title']) === true ? $dataReceived['title'] : '',
+                'parentId' => isset($dataReceived['parentId']) === true ? $dataReceived['parentId'] : 0,
+                'complexity' => isset($dataReceived['complexity']) === true ? $dataReceived['complexity'] : '',
+                'duration' => isset($dataReceived['renewalPeriod']) === true ? $dataReceived['renewalPeriod'] : 0,
+                'create_auth_without' => isset($dataReceived['addRestriction']) === true ? $dataReceived['addRestriction'] : 0,
+                'edit_auth_without' => isset($dataReceived['editRestriction']) === true ? $dataReceived['editRestriction'] : 0,
+                'icon' => isset($dataReceived['icon']) === true ? $dataReceived['icon'] : '',
+                'icon_selected' => isset($dataReceived['iconSelected']) === true ? $dataReceived['iconSelected'] : '',
+                'access_rights' => isset($dataReceived['accessRight']) === true ? $dataReceived['accessRight'] : 'W',
+            ];            
+            $filters = [
+                'id' => 'cast:integer',
+                'title' => 'trim|escape',
+                'parentId' => 'cast:integer',
+                'complexity' => 'cast:integer',
+                'duration' => 'cast:integer',
+                'create_auth_without' => 'cast:integer',
+                'edit_auth_without' => 'cast:integer',
+                'icon' => 'trim|escape',
+                'icon_selected' => 'trim|escape',
+                'access_rights' => 'trim|escape',
+            ];            
+            $inputData = dataSanitizer(
+                $data,
+                $filters,
+                $SETTINGS['cpassman_dir']
+            );
 
             // Init
             $error = false;
             $errorMessage = '';
 
             // check if title is numeric
-            if (is_numeric($post_title) === true) {
+            if (is_numeric($inputData['title']) === true) {
                 echo prepareExchangedData(
                     array(
                         'error' => true,
@@ -348,9 +361,9 @@ if (null !== $post_type) {
                 'SELECT *
                 FROM ' . prefixTable('nested_tree') . '
                 WHERE id = %i',
-                $post_folder_id
+                $inputData['id']
             );
-
+            
             //Check if duplicate folders name are allowed
             if (
                 isset($SETTINGS['duplicate_folder']) === true
@@ -359,7 +372,7 @@ if (null !== $post_type) {
                 if (
                     empty($dataFolder['id']) === false
                     && intval($dataReceived['id']) !== intval($dataFolder['id'])
-                    && $post_title !== $dataFolder['title']
+                    && $inputData['title'] !== $dataFolder['title']
                 ) {
                     echo prepareExchangedData(
                         array(
@@ -373,7 +386,7 @@ if (null !== $post_type) {
             }
 
             // Is the parent folder changed?
-            if ((int) $dataFolder['parent_id'] === (int) $post_parent_id) {
+            if ((int) $dataFolder['parent_id'] === (int) $inputData['parentId']) {
                 $parentChanged = false;
             } else {
                 $parentChanged = true;
@@ -384,7 +397,7 @@ if (null !== $post_type) {
                 'SELECT personal_folder, bloquer_creation, bloquer_modification
                 FROM ' . prefixTable('nested_tree') . '
                 WHERE id = %i',
-                $post_parent_id
+                $inputData['parentId']
             );
 
             // inherit from parent the specific settings it has
@@ -413,11 +426,11 @@ if (null !== $post_type) {
                         'SELECT valeur
                         FROM ' . prefixTable('misc') . '
                         WHERE intitule = %i AND type = %s',
-                        $post_parent_id,
+                        $inputData['parentId'],
                         'complex'
                     );
 
-                    if (isset($data['valeur']) === true && (int) $post_complexity < (int) $data['valeur']) {
+                    if (isset($data['valeur']) === true && (int) $inputData['complexity'] < (int) $data['valeur']) {
                         echo prepareExchangedData(
                             array(
                                 'error' => true,
@@ -430,24 +443,46 @@ if (null !== $post_type) {
                     }
                 }
             }
-            
+
+            // Check if user is allowed
+            if (
+                !(
+                    (int) $isPersonal === 1
+                    || (int) $session->get('user-admin') === 1
+                    || (int) $session->get('user-manager') === 1
+                    || (int) $session->get('user-can_manage_all_users') === 1
+                    || (isset($SETTINGS['enable_user_can_create_folders']) === true
+                        && (int) $SETTINGS['enable_user_can_create_folders'] == 1)
+                    || (int) $session->get('user-can_create_root_folder') === 1
+                )
+            ) {
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
+                break;
+            }
+
             // Prepare update parameters
             $folderParameters = array(
-                'parent_id' => $post_parent_id,
-                'title' => $post_title,
+                'parent_id' => $inputData['parentId'],
+                'title' => $inputData['title'],
                 'personal_folder' => $isPersonal,
-                'fa_icon' => empty($post_icon) === true ? TP_DEFAULT_ICON : $post_icon,
-                'fa_icon_selected' => empty($post_icon_selected) === true ? TP_DEFAULT_ICON_SELECTED : $post_icon_selected,
+                'fa_icon' => empty($inputData['icon']) === true ? TP_DEFAULT_ICON : $inputData['icon'],
+                'fa_icon_selected' => empty($inputData['icon_selected']) === true ? TP_DEFAULT_ICON_SELECTED : $inputData['icon_selected'],
             );
             
-            if ($post_renewal_period !== -1 && $dataFolder['renewal_period'] !== $post_renewal_period) {
-                $folderParameters['renewal_period'] = $post_renewal_period;
+            if ($inputData['duration'] !== -1 && $dataFolder['renewal_period'] !== $inputData['duration']) {
+                $folderParameters['renewal_period'] = $inputData['duration'];
             }
-            if ($post_add_restriction !== -1 && $dataFolder['bloquer_creation'] !== $post_add_restriction) {
-                $folderParameters['bloquer_creation'] = $post_add_restriction;
+            if ($inputData['create_auth_without'] !== -1 && $dataFolder['bloquer_creation'] !== $inputData['create_auth_without']) {
+                $folderParameters['bloquer_creation'] = $inputData['create_auth_without'];
             }
-            if ($post_edit_restriction !== -1 && $dataFolder['bloquer_modification'] !== $post_edit_restriction) {
-                $folderParameters['bloquer_modification'] = $post_edit_restriction;
+            if ($inputData['edit_auth_without'] !== -1 && $dataFolder['bloquer_modification'] !== $inputData['edit_auth_without']) {
+                $folderParameters['bloquer_modification'] = $inputData['edit_auth_without'];
             }
             
             // Now update
@@ -474,7 +509,7 @@ if (null !== $post_type) {
             DB::update(
                 prefixTable('misc'),
                 array(
-                    'valeur' => $post_complexity,
+                    'valeur' => $inputData['complexity'],
                     'updated_at' => time(),
                 ),
                 'intitule = %s AND type = %s',
@@ -530,29 +565,58 @@ if (null !== $post_type) {
             );
 
             // prepare variables
-            $post_title = filter_var($dataReceived['title'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_parent_id = isset($dataReceived['parentId']) === true ? filter_var($dataReceived['parentId'], FILTER_SANITIZE_NUMBER_INT) : 0;
-            $post_complexity = filter_var($dataReceived['complexity'], FILTER_SANITIZE_NUMBER_INT);
-            $post_duration = isset($dataReceived['renewalPeriod']) === true ? filter_var($dataReceived['renewalPeriod'], FILTER_SANITIZE_NUMBER_INT) : 0;
-            $post_create_auth_without = isset($dataReceived['renewalPeriod']) === true ? filter_var($dataReceived['addRestriction'], FILTER_SANITIZE_NUMBER_INT) : 0;
-            $post_edit_auth_without = isset($dataReceived['renewalPeriod']) === true ? filter_var($dataReceived['editRestriction'], FILTER_SANITIZE_NUMBER_INT) : 0;
-            $post_icon = filter_var($dataReceived['icon'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_icon_selected = filter_var($dataReceived['iconSelected'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_access_rights = isset($dataReceived['accessRight']) === true ? filter_var($dataReceived['accessRight'], FILTER_SANITIZE_FULL_SPECIAL_CHARS) : 'W';
+            $data = [
+                'title' => isset($dataReceived['title']) === true ? $dataReceived['title'] : '',
+                'parentId' => isset($dataReceived['parentId']) === true ? $dataReceived['parentId'] : 0,
+                'complexity' => isset($dataReceived['complexity']) === true ? $dataReceived['complexity'] : '',
+                'duration' => isset($dataReceived['renewalPeriod']) === true ? $dataReceived['renewalPeriod'] : 0,
+                'create_auth_without' => isset($dataReceived['addRestriction']) === true ? $dataReceived['addRestriction'] : 0,
+                'edit_auth_without' => isset($dataReceived['editRestriction']) === true ? $dataReceived['editRestriction'] : 0,
+                'icon' => isset($dataReceived['icon']) === true ? $dataReceived['icon'] : '',
+                'icon_selected' => isset($dataReceived['iconSelected']) === true ? $dataReceived['iconSelected'] : '',
+                'access_rights' => isset($dataReceived['accessRight']) === true ? $dataReceived['accessRight'] : 'W',
+            ];            
+            $filters = [
+                'title' => 'trim|escape',
+                'parentId' => 'cast:integer',
+                'complexity' => 'cast:integer',
+                'duration' => 'cast:integer',
+                'create_auth_without' => 'cast:integer',
+                'edit_auth_without' => 'cast:integer',
+                'icon' => 'trim|escape',
+                'icon_selected' => 'trim|escape',
+                'access_rights' => 'trim|escape',
+            ];            
+            $inputData = dataSanitizer(
+                $data,
+                $filters,
+                $SETTINGS['cpassman_dir']
+            );
+
+            // Check if parent folder is personal
+            $dataParent = DB::queryfirstrow(
+                'SELECT personal_folder
+                FROM ' . prefixTable('nested_tree') . '
+                WHERE id = %i',
+                $inputData['parentId']
+            );
+
+            $isPersonal = (isset($dataParent['personal_folder']) === true && (int) $dataParent['personal_folder'] == 1) ? 1 : 0;
 
             // Create folder
             require_once 'folders.class.php';
             $folderManager = new FolderManager($lang);
             $params = [
-                'title' => (string) $post_title,
-                'parent_id' => (int) $post_parent_id,
-                'complexity' => (int) $post_complexity,
-                'duration' => (int) $post_duration,
-                'create_auth_without' => (int) $post_create_auth_without,
-                'edit_auth_without' => (int) $post_edit_auth_without,
-                'icon' => (string) $post_icon,
-                'icon_selected' => (string) $post_icon_selected,
-                'access_rights' => (string) $post_access_rights,
+                'title' => (string) $inputData['title'],
+                'parent_id' => (int) $inputData['parentId'],
+                'personal_folder' => (int) $isPersonal,
+                'complexity' => (int) $inputData['complexity'],
+                'duration' => (int) $inputData['duration'],
+                'create_auth_without' => (int) $inputData['create_auth_without'],
+                'edit_auth_without' => (int) $inputData['edit_auth_without'],
+                'icon' => (string) $inputData['icon'],
+                'icon_selected' => (string) $inputData['icon_selected'],
+                'access_rights' => (string) $inputData['access_rights'],
                 'user_is_admin' => (int) $session->get('user-admin'),
                 'user_accessible_folders' => (array) $session->get('user-accessible_folders'),
                 'user_is_manager' => (int) $session->get('user-manager'),
@@ -615,16 +679,91 @@ if (null !== $post_type) {
                 FILTER_SANITIZE_FULL_SPECIAL_CHARS
             );
 
+            // Ensure that the root folder is not part of the list
+            if (in_array(0, $post_folders, true)) {
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'). " (You can't delete the root folder)",
+                    ),
+                    'encode'
+                );
+                break;
+            }
+            
+            // Ensure that user has access to all folders
+            $foldersAccessible = DB::query(
+                'SELECT id
+                FROM ' . prefixTable('nested_tree') . '
+                WHERE id IN %li AND id IN %li',
+                $post_folders,
+                $session->get('user-accessible_folders')
+            );
+            // Extract found folder IDs
+            $accessibleIds = array_column($foldersAccessible, 'id');
+            // Identify those that are not existing in DB or not visible by user
+            $missingFolders = array_diff($post_folders, $accessibleIds);
+            if (!empty($missingFolders)) {
+                // There is some issues
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to') . ' (The following folders are not accessible or do not exist: ' . implode(', ', $missingFolders) . ')',
+                    ),
+                    'encode'
+                );
+                break;
+            }
+
             //decrypt and retreive data in JSON format
             $folderForDel = array();
 
+            // Start transaction
+            DB::startTransaction();
+
             foreach ($post_folders as $folderId) {
-                // Exclude a folder with id alreay in the list
+                // Check if parent folder is personal
+                $dataParent = DB::queryfirstrow(
+                    'SELECT personal_folder
+                    FROM ' . prefixTable('nested_tree') . '
+                    WHERE id = %i',
+                    $folderId
+                );
+
+                $isPersonal = (isset($dataParent['personal_folder']) === true && (int) $dataParent['personal_folder'] === 1) ? 1 : 0;
+
+                // Check if user is allowed
+                if (
+                    !(
+                        (int) $isPersonal === 1
+                        || (int) $session->get('user-admin') === 1
+                        || (int) $session->get('user-manager') === 1
+                        || (int) $session->get('user-can_manage_all_users') === 1
+                        || (isset($SETTINGS['enable_user_can_create_folders']) === true
+                            && (int) $SETTINGS['enable_user_can_create_folders'] == 1)
+                        || (int) $session->get('user-can_create_root_folder') === 1
+                    )
+                ) {
+                    echo prepareExchangedData(
+                        array(
+                            'error' => true,
+                            'message' => $lang->get('error_not_allowed_to'),
+                        ),
+                        'encode'
+                    );
+
+                    // Rollback transaction if error
+                    DB::rollback();
+
+                    exit;
+                }
+
+                // Exclude a folder with id already in the list
                 if (in_array($folderId, $folderForDel) === false) {
                     // Get through each subfolder
                     $subFolders = $tree->getDescendants($folderId, true);
                     foreach ($subFolders as $thisSubFolders) {
-                        if (($thisSubFolders->parent_id > 0 || $thisSubFolders->parent_id == 0)
+                        if ($thisSubFolders->parent_id >= 0
                             && $thisSubFolders->title !== $session->get('user-id')
                         ) {
                             //Store the deleted folder (recycled bin)
@@ -643,7 +782,11 @@ if (null !== $post_type) {
                             $folderForDel[] = $thisSubFolders->id;
 
                             //delete items & logs
-                            $itemsInSubFolder = DB::query('SELECT id FROM ' . prefixTable('items') . ' WHERE id_tree=%i', $thisSubFolders->id);
+                            $itemsInSubFolder = DB::query(
+                                'SELECT id FROM ' . prefixTable('items') . ' 
+                                WHERE id_tree=%i', 
+                                $thisSubFolders->id
+                            );
                             foreach ($itemsInSubFolder as $item) {
                                 DB::update(
                                     prefixTable('items'),
@@ -653,7 +796,7 @@ if (null !== $post_type) {
                                     'id = %i',
                                     $item['id']
                                 );
-                                
+
                                 // log
                                 logItems(
                                     $SETTINGS,
@@ -671,71 +814,37 @@ if (null !== $post_type) {
 
                                 //Update CACHE table
                                 updateCacheTable('delete_value',(int) $item['id']);
-
-                                // --> build json tree  
-                                // update cache_tree
-                                $cache_tree = DB::queryfirstrow(
-                                    'SELECT increment_id, folders, visible_folders
-                                    FROM ' . prefixTable('cache_tree').' WHERE user_id = %i',
-                                    (int) $session->get('user-id')
-                                );
-                                if (DB::count()>0) {
-                                    // remove id from folders
-                                    if (empty($cache_tree['folders']) === false && is_null($cache_tree['folders']) === false) {
-                                        $a_folders = json_decode($cache_tree['folders'], true);
-                                        $key = array_search($item['id'], $a_folders, true);
-                                        if ($key !== false) {
-                                            unset($a_folders[$key]);
-                                        }
-                                    } else {
-                                        $a_folders = [];
-                                    }
-
-                                    // remove id from visible_folders
-                                    if (empty($cache_tree['visible_folders']) === false && is_null($cache_tree['visible_folders']) === false) {
-                                        $a_visible_folders = json_decode($cache_tree['visible_folders'], true);
-                                        foreach ($a_visible_folders as $i => $v) {
-                                            if ($v['id'] == $item['id']) {
-                                                unset($a_visible_folders[$i]);
-                                            }
-                                        }
-                                    } else {
-                                        $a_visible_folders = [];
-                                    }
-
-                                    DB::update(
-                                        prefixTable('cache_tree'),
-                                        array(
-                                            'folders' => json_encode($a_folders),
-                                            'visible_folders' => json_encode($a_visible_folders),
-                                            'timestamp' => time(),
-                                        ),
-                                        'increment_id = %i',
-                                        (int) $cache_tree['increment_id']
-                                    );
-                                }
-                                // <-- end - build json tree
                             }
 
                             //Actualize the variable
                             $session->set('user-nb_folders', $session->get('user-nb_folders') - 1);
                         }
                     }
-
-                    // delete folders
-                    $folderForDel = array_unique($folderForDel);
-                    foreach ($folderForDel as $fol) {
-                        DB::delete(prefixTable('nested_tree'), 'id = %i', $fol);
-                    }
                 }
             }
 
-            //rebuild tree
-            $tree->rebuild();
+            // Add new task for building user cache tree
+            if ((int) $session->get('user-admin') !== 1) {
+                DB::insert(
+                    prefixTable('background_tasks'),
+                    array(
+                        'created_at' => time(),
+                        'process_type' => 'user_build_cache_tree',
+                        'arguments' => json_encode([
+                            'user_id' => (int) $session->get('user-id'),
+                        ], JSON_HEX_QUOT | JSON_HEX_TAG),
+                        'updated_at' => '',
+                        'finished_at' => '',
+                        'output' => '',
+                    )
+                );
+            }
 
-            // reload cache table
-            include_once $SETTINGS['cpassman_dir'] . '/sources/main.functions.php';
-            updateCacheTable('reload', null);
+            // delete folders
+            $folderForDel = array_unique($folderForDel);
+            foreach ($folderForDel as $fol) {
+                DB::delete(prefixTable('nested_tree'), 'id = %i', $fol);
+            }
 
             // Update timestamp
             DB::update(
@@ -748,6 +857,12 @@ if (null !== $post_type) {
                 'timestamp',
                 'last_folder_change'
             );
+
+            // Commit transaction
+            DB::commit();
+
+            //rebuild tree
+            $tree->rebuild();
 
             echo prepareExchangedData(
                 array(
@@ -795,6 +910,38 @@ if (null !== $post_type) {
             // Test if target folder is Read-only
             // If it is then stop
             if (in_array($post_target_folder_id, $session->get('user-read_only_folders')) === true) {
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
+                break;
+            }
+
+            // Check if target parent folder is personal
+            $dataParent = DB::queryfirstrow(
+                'SELECT personal_folder
+                FROM ' . prefixTable('nested_tree') . '
+                WHERE id = %i',
+                $post_target_folder_id
+            );
+
+            $isPersonal = (isset($dataParent['personal_folder']) === true && (int) $dataParent['personal_folder'] === 1) ? 1 : 0;
+
+            // Check if user is allowed
+            if (
+                !(
+                    (int) $isPersonal === 1
+                    || (int) $session->get('user-admin') === 1
+                    || (int) $session->get('user-manager') === 1
+                    || (int) $session->get('user-can_manage_all_users') === 1
+                    || (isset($SETTINGS['enable_user_can_create_folders']) === true
+                        && (int) $SETTINGS['enable_user_can_create_folders'] == 1)
+                    || (int) $session->get('user-can_create_root_folder') === 1
+                )
+            ) {
                 echo prepareExchangedData(
                     array(
                         'error' => true,
@@ -1194,16 +1341,15 @@ if (null !== $post_type) {
                             'at_copy',
                             $session->get('user-login')
                         );
+
+                        // Add item to cache table
+                        updateCacheTable('add_value', (int) $newItemId);
                     }
                 }
             }
 
             // rebuild tree
             $tree->rebuild();
-
-            // reload cache table
-            include_once $SETTINGS['cpassman_dir'] . '/sources/main.functions.php';
-            updateCacheTable('reload', NULL);
 
             // Update timestamp
             DB::update(

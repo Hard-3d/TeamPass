@@ -29,7 +29,7 @@ declare(strict_types=1);
  * @see       https://www.teampass.net
  */
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\PerformChecks\PerformChecks;
@@ -41,10 +41,10 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -152,7 +152,7 @@ header('Cache-Control: no-cache, no-store, must-revalidate');
                         '<?php echo $lang->get('server_answer_error') . '<br />' . $lang->get('server_returned_data') . ':<br />'; ?>' + data.error,
                         '', {
                             closeButton: true,
-                            positionClass: 'toastr-top-right'
+                            positionClass: 'toast-bottom-right'
                         }
                     );
                     return false;
@@ -226,7 +226,7 @@ header('Cache-Control: no-cache, no-store, must-revalidate');
                         '<?php echo $lang->get('server_answer_error') . '<br />' . $lang->get('server_returned_data') . ':<br />'; ?>' + data.error,
                         '', {
                             closeButton: true,
-                            positionClass: 'toastr-top-right'
+                            positionClass: 'toast-bottom-right'
                         }
                     );
                     return false;
@@ -274,7 +274,7 @@ header('Cache-Control: no-cache, no-store, must-revalidate');
                         '<?php echo $lang->get('server_answer_error') . '<br />' . $lang->get('server_returned_data') . ':<br />'; ?>' + data.error,
                         '', {
                             closeButton: true,
-                            positionClass: 'toastr-top-right'
+                            positionClass: 'toast-bottom-right'
                         }
                     );
                     return false;

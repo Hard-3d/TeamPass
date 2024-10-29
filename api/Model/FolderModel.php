@@ -2,35 +2,45 @@
 /**
  * Teampass - a collaborative passwords manager.
  * ---
- * This library is distributed in the hope that it will be useful,
+ * This file is part of the TeamPass project.
+ * 
+ * TeamPass is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ * 
+ * TeamPass is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * 
+ * Certain components of this file may be under different licenses. For
+ * details, see the `licenses` directory or individual file headers.
  * ---
- *
- * @project   Teampass
  * @version    API
  *
- * @file      folderModel.php
- * ---
- *
+ * @file      FolderModel.php
  * @author    Nils Laumaillé (nils@teampass.net)
- *
  * @copyright 2009-2024 Teampass.net
- *
- * @license   https://spdx.org/licenses/GPL-3.0-only.html#licenseText GPL-3.0
- * ---
- *
+ * @license   GPL-3.0
  * @see       https://www.teampass.net
  */
 
 use TeampassClasses\Language\Language;
 
-require_once API_ROOT_PATH . "/Model/Database.php";
-class FolderModel extends Database
+class FolderModel
 {
     public function getFoldersInfo(array $foldersId): array
     {
-        $rows = $this->select( "SELECT id, title FROM " . prefixTable('nested_tree') . " WHERE nlevel=1" );
+        // Get folders
+        $rows = DB::query(
+            'SELECT id, title
+            FROM ' . prefixTable('nested_tree') . '
+            WHERE nlevel = %i',
+            1
+        );
 
         $ret = [];
 
@@ -57,7 +67,12 @@ class FolderModel extends Database
     private function getFoldersChildren(int $parentId, array $foldersId): array
     {
         $ret = [];
-        $childrens = $this->select('SELECT id, title FROM ' . prefixTable('nested_tree') . ' WHERE parent_id=' . $parentId);
+        $childrens = DB::query(
+            'SELECT id, title
+            FROM ' . prefixTable('nested_tree') . '
+            WHERE parent_id = %i',
+            $parentId
+        );
 
         if ( count($childrens) > 0) {
             foreach ($childrens as $children) {
@@ -169,28 +184,6 @@ class FolderModel extends Database
             ];}
 
         // Create folder
-        /*
-        require_once TEAMPASS_ROOT_PATH.'/sources/folders.functions.php';
-        $creationStatus = createNewFolder(
-            (string) $title,
-            (int) $parent_id,
-            (int) $complexity,
-            (int) $duration,
-            (int) $create_auth_without,
-            (int) $edit_auth_without,
-            (string) $icon,
-            (string) $icon_selected,
-            (string) $access_rights,
-            (int) $is_admin,
-            (array) $foldersId,
-            (int) $is_manager,
-            (int) $user_can_create_root_folder,
-            (int) $user_can_manage_all_users,
-            (int) $user_id,
-            (string) $user_roles
-        );
-        */
-
         require_once TEAMPASS_ROOT_PATH.'/sources/folders.class.php';
         $lang = new Language();
         $folderManager = new FolderManager($lang);

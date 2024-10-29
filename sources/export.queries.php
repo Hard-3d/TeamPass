@@ -33,7 +33,7 @@ declare(strict_types=1);
 use voku\helper\AntiXSS;
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use EZimuel\PHPSecureSession;
 use TeampassClasses\PerformChecks\PerformChecks;
@@ -47,11 +47,11 @@ $session = SessionManager::getSession();
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -632,7 +632,7 @@ if (null !== $post_type) {
                     if ($prev_path !== $record['path']) {
                         $html_table .= '
                             <tr>
-                                <td colspan="6">'.$record['path'].'</td>
+                                <td colspan="6">'.htmlspecialchars($record['path']).'</td>
                             </tr>';
                     }
                     $prev_path = $record['path'];
@@ -640,12 +640,12 @@ if (null !== $post_type) {
                     // build
                     $html_table .= '
                     <tr>
-                        <td>'.$record['label'].'</td>
-                        <td>'.$record['login'].'</td>
-                        <td>'.$record['pw'].'</td>
-                        <td>'.$record['url'].'</td>
-                        <td>'.$record['description'].'</td>
-                        <td>'.$record['email'].'</td>
+                        <td>'.htmlspecialchars($record['label']).'</td>
+                        <td>'.htmlspecialchars($record['login']).'</td>
+                        <td>'.htmlspecialchars($record['pw']).'</td>
+                        <td>'.htmlspecialchars($record['url']).'</td>
+                        <td>'.htmlspecialchars($record['description']).'</td>
+                        <td>'.htmlspecialchars($record['email']).'</td>
                     </tr>';
                 }
                 $html_table .= '

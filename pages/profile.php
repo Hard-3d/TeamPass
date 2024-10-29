@@ -29,7 +29,7 @@ declare(strict_types=1);
  * @see       https://www.teampass.net
  */
 
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
@@ -40,10 +40,10 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses('DB');
 
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -294,7 +294,8 @@ foreach ($session->get('user-roles_array') as $role) {
                                         echo '
                                     <li class="list-group-item">
                                         <b><i class="fas fa-paper-plane fa-fw fa-lg mr-2"></i>' . $lang->get('user_profile_api_key') . '</b>
-                                        <a class="float-right" id="profile-user-api-token">',
+                                        <button class="btn btn-sm btn-primary float-right" id="copy-api-key"><i class="fa-regular fa-copy  pointer"></i></button>
+                                        <a class="float-right mr-2" id="profile-user-api-token">',
                                             null !== $session->get('user-api_key') ? $session->get('user-api_key') : '',
                                         '</a>
                                     </li>';
@@ -395,19 +396,19 @@ foreach ($session->get('user-roles_array') as $role) {
                                     </div>
 
                                     <div class="form-group">
-                                        <label class="col-sm-10 control-label"><?php echo $lang->get('timezone_selection'); ?></label>
+                                        <label class="col-sm-10 control-label"><?php echo $lang->get('timezone_selection');?></label>
                                         <div class="col-sm-10">
                                             <select class="form-control" id="profile-user-timezone">
-                                                <?php
-                                                foreach ($zones as $key => $zone) {
-                                                    echo '
-                                                <option value="' . $key . '"',
-                                                    $session->has('user-timezone') && $session->get('user-timezone') && null !== $session->get('user-timezone') && $session->get('user-timezone') === $key ?
-                                                    ' selected' :
-                                                    (isset($SETTINGS['timezone']) === true && $SETTINGS['timezone'] === $key ? ' selected' : ''),
-                                                '>' . $zone . '</option>';
-                                                }
-                                                ?>
+                                                <?php foreach ($zones as $key => $zone): ?>
+                                                    <option value="<?php echo $key; ?>"<?php 
+                                                        if ($session->has('user-timezone'))
+                                                            if($session->get('user-timezone') === $key)
+                                                                echo ' selected';
+                                                            elseif ($session->get('user-timezone') === 'not_defined')
+                                                                if (isset($SETTINGS['timezone']) && $SETTINGS['timezone'] === $key)
+                                                                    echo ' selected';
+                                                    ?>><?php echo $zone; ?></option>
+                                                <?php endforeach; ?>
                                             </select>
                                         </div>
                                     </div>
@@ -438,6 +439,22 @@ foreach ($session->get('user-roles_array') as $role) {
                                                 
                                                 <option value="full" <?php echo $session->has('user-tree_load_strategy') && $session->get('user-tree_load_strategy') && null !== $session->get('user-tree_load_strategy') && $session->get('user-tree_load_strategy') === 'full' ? ' selected' : '';?>>
                                                     <?php echo $lang->get('full'); ?>
+                                                </option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="col-sm-10 control-label"><?php echo $lang->get('items_page_split_view_mode'); ?></label>
+                                        <div class="col-sm-10">
+                                            <select class="form-control" id="profile-user-split_view_mode">
+                                                
+                                                <option value="0" <?php echo $session->has('user-split_view_mode') && $session->get('user-split_view_mode') && null !== $session->get('user-split_view_mode') && $session->get('user-split_view_mode') === 0 ? 'selected' : '';?>>
+                                                    <?php echo $lang->get('no'); ?>
+                                                </option>
+                                                
+                                                <option value="1" <?php echo $session->has('user-split_view_mode') && $session->get('user-split_view_mode') && null !== $session->get('user-split_view_mode') && (int) $session->get('user-split_view_mode') === 1 ? 'selected' : '';?>>
+                                                    <?php echo $lang->get('yes'); ?>
                                                 </option>
                                             </select>
                                         </div>

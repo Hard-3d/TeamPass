@@ -31,7 +31,7 @@ declare(strict_types=1);
 
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
@@ -42,10 +42,10 @@ require_once 'main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -402,13 +402,13 @@ if (null === $request->query->get('type')) {
         $sOutputItem .= '"' . base64_encode(htmlspecialchars(stripslashes((string) $record['tags']), ENT_QUOTES)) . '", ';
         // col6 - URL
         if ($record['url'] !== '0') {
-            $sOutputItem .= '"'.filter_var($record['url'], FILTER_SANITIZE_URL).'", ';
+            $sOutputItem .= '"'.htmlspecialchars(filter_var($record['url'], FILTER_SANITIZE_URL)).'", ';
         } else {
             $sOutputItem .= '"", ';
         }
 
         //col7 - Prepare the Treegrid
-        $sOutputItem .= '"' . base64_encode(htmlspecialchars(stripslashes((string) $record['folder']), ENT_QUOTES)) . '"';
+        $sOutputItem .= '"' . base64_encode(stripslashes((string) $record['folder'])) . '"';
         //Finish the line
         //$sOutputItem .= '], ';
         if ($getItemInList === true) {

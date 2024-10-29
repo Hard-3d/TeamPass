@@ -39,6 +39,8 @@ use EZimuel\PHPSecureSession;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use OTPHP\TOTP;
+use TeampassClasses\EmailService\EmailService;
+use TeampassClasses\EmailService\EmailSettings;
 
 // Load functions
 require_once 'main.functions.php';
@@ -49,7 +51,7 @@ $session = SessionManager::getSession();
 $request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -427,7 +429,8 @@ switch ($inputData['type']) {
                 // if not allowed then warn user
                 if (($session->has('user-create_item_without_password') && $session->has('user-create_item_without_password') && null !== $session->get('user-create_item_without_password')
                         && (int) $session->get('user-create_item_without_password') !== 1) ||
-                    empty($post_password) === false
+                    empty($post_password) === false ||
+                    (int) $post_folder_is_personal === 1
                 ) {
                     // NEW ENCRYPTION
                     $cryptedStuff = doDataEncryption($post_password);
@@ -756,7 +759,7 @@ switch ($inputData['type']) {
                     // Get path
                     $path = geItemReadablePath(
                         (int) $inputData['folderId'],
-                        $label,
+                        $inputData['label'],
                         $SETTINGS
                     );
 
@@ -803,6 +806,7 @@ switch ($inputData['type']) {
 
             $arrData = array(
                 'error' => false,
+                'item_id' => $newID,
             );
         } else {
             // an error appears on JSON format
@@ -1035,6 +1039,45 @@ switch ($inputData['type']) {
             $inputData['itemId'],
             'at_creation'
         );
+
+        // If source and destination folder are different -> move item
+        if ((int) $dataItem['id_tree'] !== $inputData['folderId']) {
+            // Check that user can delete on old folder
+            $checkRights = getCurrentAccessRights(
+                $session->get('user-id'),
+                $inputData['itemId'],
+                (int) $dataItem['id_tree'],
+            );
+
+            if ($checkRights['error'] || !$checkRights['delete']) {
+                echo (string) prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
+                break;
+            }
+        }
+
+        // Always check that user can write on requested folder
+        $checkRights = getCurrentAccessRights(
+            $session->get('user-id'),
+            $inputData['itemId'],
+            $inputData['folderId'],
+        );
+
+        if ($checkRights['error'] || !$checkRights['edit']) {
+            echo (string) prepareExchangedData(
+                array(
+                    'error' => true,
+                    'message' => $lang->get('error_not_allowed_to'),
+                ),
+                'encode'
+            );
+            break;
+        }
 
         // Does the user has the sharekey
         //db::debugmode(true);
@@ -2014,7 +2057,7 @@ switch ($inputData['type']) {
             }
 
             // generate 2d key
-            $session->set('user-key_tmp', bin2hex(GenerateCryptKey(16, false, true, true, false, true, $SETTINGS)));
+            $session->set('user-key_tmp', bin2hex(GenerateCryptKey(16, false, true, true, false, true)));
 
             // Send email
             if (is_array($post_diffusion_list) === true && count($post_diffusion_list) > 0) {
@@ -2208,8 +2251,9 @@ switch ($inputData['type']) {
 
             // generate the query to update the new record with the previous values
             $aSet = array();
-            $aSet['created_at'] = time();
             foreach ($originalRecord as $key => $value) {
+                $aSet['item_key'] = uniqidReal(50);
+                $aSet['created_at'] = time();
                 if ($key === 'id_tree') {
                     $aSet['id_tree'] = $post_dest_id;
                 } elseif ($key === 'label') {
@@ -2465,9 +2509,6 @@ switch ($inputData['type']) {
                 'at_copy',
                 $session->get('user-login')
             );
-            // reload cache table
-            include_once $SETTINGS['cpassman_dir'] . '/sources/main.functions.php';
-            updateCacheTable('reload', null);
 
             echo (string) prepareExchangedData(
                 array(
@@ -2477,6 +2518,9 @@ switch ($inputData['type']) {
                 ),
                 'encode'
             );
+
+            // Add new item to cache table.
+            updateCacheTable('add_value', (int) $newItemId);
         } else {
             // no item
             echo (string) prepareExchangedData(
@@ -2827,14 +2871,14 @@ switch ($inputData['type']) {
                 $arrData['show_detail_option'] = 2;
             }
 
-            $arrData['label'] = $dataItem['label'] === '' ? '' : htmlspecialchars_decode($dataItem['label'], ENT_QUOTES);
+            $arrData['label'] = $dataItem['label'] === '' ? '' : $dataItem['label'];
             $arrData['pw'] = $pw;
             $arrData['pw_decrypt_info'] = empty($pw) === true && $pwIsEmptyNormal === false ? 'error_no_sharekey_yet' : '';
             $arrData['email'] = empty($dataItem['email']) === true || $dataItem['email'] === null ? '' : $dataItem['email'];
-            $arrData['url'] = empty($dataItem['url']) === true ? '' : '<a href="'.$dataItem['url'].'" target="_blank">'.$dataItem['url'].'</a>';
+            $arrData['url'] = empty($dataItem['url']) === true ? '' : $dataItem['url'];
             $arrData['folder'] = $dataItem['id_tree'];
             $arrData['description'] = $dataItem['description'];
-            $arrData['login'] = htmlspecialchars_decode(str_replace(array('"'), array('&quot;'), $dataItem['login']), ENT_QUOTES);
+            $arrData['login'] = $dataItem['login'];
             $arrData['id_restricted_to'] = $listeRestriction;
             $arrData['id_restricted_to_roles'] = $listRestrictionRoles;
             $arrData['tags'] = $tags;
@@ -3214,7 +3258,7 @@ switch ($inputData['type']) {
         // Get all expected data about this ITEM
         } else {
             // generate 2d key
-            $session->set('user-key_tmp', bin2hex(GenerateCryptKey(16, false, true, true, false, true, $SETTINGS)));
+            $session->set('user-key_tmp', bin2hex(GenerateCryptKey(16, false, true, true, false, true)));
 
             // Prepare files listing
             $attachments = [];
@@ -3498,6 +3542,23 @@ switch ($inputData['type']) {
             $inputData['itemId'] = $data['id'];
         }
         $inputData['label'] = $data['label'];
+
+        // Check that user can delete on this folder
+        $checkRights = getCurrentAccessRights(
+            $session->get('user-id'),
+            $inputData['itemId'],
+            (int) $data['id_tree'],
+        );
+
+        if ($checkRights['error'] || !$checkRights['delete']) {
+            echo (string) prepareExchangedData(
+                array(
+                    'error' => true,
+                    'message' => $lang->get('error_not_allowed_to'),
+                ),
+                'encode'
+            );
+        }
 
         // delete item consists in disabling it
         DB::update(
@@ -3903,7 +3964,8 @@ switch ($inputData['type']) {
             // Prepare tree
             $arbo = $tree->getPath($inputData['id'], true);
             foreach ($arbo as $elem) {
-                if ($elem->title === $session->get('user-id') && (int) $elem->nlevel === 1) {
+                // Personnal folder
+                if ((int) $elem->title === (int) $session->get('user-id') && (int) $elem->nlevel === 1) {
                     $elem->title = $session->get('user-login');
                 }
                 // Store path elements
@@ -4164,7 +4226,12 @@ switch ($inputData['type']) {
             // List all ITEMS
             if ($folderIsPf === false) {
                 $where->add('i.inactif=%i', 0);
-                $where->add('l.date=%l', '(SELECT date FROM ' . prefixTable('log_items') . " WHERE action IN ('at_creation', 'at_modification') AND id_item=i.id ORDER BY date DESC LIMIT 1)");
+                $sql_e='(SELECT date FROM ' . prefixTable('log_items') 
+                    . " WHERE action = 'at_creation' AND id_item=i.id " 
+                    . 'union all SELECT date FROM '. prefixTable('log_items') 
+                    . " WHERE action = 'at_modification' AND raison = 'at_pw'
+                    AND id_item=i.id ORDER BY date DESC LIMIT 1)";
+                $where->add('l.date=%l', $sql_e);
                 if (empty($limited_to_items) === false) {
                     $where->add('i.id IN %ls', explode(',', $limited_to_items));
                 }
@@ -4180,7 +4247,8 @@ switch ($inputData['type']) {
                     MIN(n.renewal_period) AS renewal_period,
                     MIN(l.action) AS log_action,
                     l.id_user AS log_user,
-                    i.url AS link
+                    i.url AS link,
+                    i.email AS email
                     FROM ' . prefixTable('items') . ' AS i
                     INNER JOIN ' . prefixTable('nested_tree') . ' AS n ON (i.id_tree = n.id)
                     INNER JOIN ' . prefixTable('log_items') . ' AS l ON (i.id = l.id_item)
@@ -4201,7 +4269,8 @@ switch ($inputData['type']) {
                     MIN(n.renewal_period) AS renewal_period,
                     MIN(l.action) AS log_action,
                     l.id_user AS log_user,
-                    i.url AS link
+                    i.url AS link,
+                    i.email AS email
                     FROM ' . prefixTable('items') . ' AS i
                     INNER JOIN ' . prefixTable('nested_tree') . ' AS n ON (i.id_tree = n.id)
                     INNER JOIN ' . prefixTable('log_items') . ' AS l ON (i.id = l.id_item)
@@ -4296,6 +4365,7 @@ switch ($inputData['type']) {
                     $html_json[$record['id']]['is_result_of_search'] = 0;
                     $html_json[$record['id']]['is_favourited'] = in_array($record['id'], $session->get('user-favorites')) === true ? 1 : 0;
                     $html_json[$record['id']]['link'] = $record['link'];
+                    $html_json[$record['id']]['email'] = $record['email'] ?? '';
                     $html_json[$record['id']]['fa_icon'] = $record['fa_icon'];
 
                     // Possible values:
@@ -4538,7 +4608,7 @@ switch ($inputData['type']) {
                     $session->get('user-private_key')
                 )
             );
-
+            
             $log = 'Used user ID: '.$session->get('user-id')."\n";
             $log .= 'Used user Private key: '.$session->get('user-private_key')."\n";
             $log .= '$currentUserKey: '.$dataItem['share_key']."\n";
@@ -4546,7 +4616,6 @@ switch ($inputData['type']) {
                 $dataItem['share_key'],
                 $session->get('user-private_key')
             )."\n\n";
-            file_put_contents('/var/www/html/tplog.log', $log, FILE_APPEND | LOCK_EX);
         }
 
         $returnValues = array(
@@ -5119,6 +5188,42 @@ switch ($inputData['type']) {
             WHERE i.id=%i',
             $inputData['itemId']
         );
+
+        // Check that user can delete on old folder
+        $checkRights = getCurrentAccessRights(
+            $session->get('user-id'),
+            $inputData['itemId'],
+            (int) $dataSource['id_tree'],
+        );
+
+        if ($checkRights['error'] || !$checkRights['delete']) {
+            echo (string) prepareExchangedData(
+                array(
+                    'error' => true,
+                    'message' => $lang->get('error_not_allowed_to'),
+                ),
+                'encode'
+            );
+            break;
+        }
+
+        // Check that user can write on requested folder
+        $checkRights = getCurrentAccessRights(
+            $session->get('user-id'),
+            $inputData['itemId'],
+            $inputData['folderId'],
+        );
+
+        if ($checkRights['error'] || !$checkRights['edit']) {
+            echo (string) prepareExchangedData(
+                array(
+                    'error' => true,
+                    'message' => $lang->get('error_not_allowed_to'),
+                ),
+                'encode'
+            );
+            break;
+        }
 
         // get data about new folder
         $dataDestination = DB::queryfirstrow(
@@ -6128,8 +6233,8 @@ switch ($inputData['type']) {
         }
 
         // generate session
-        $otv_code = GenerateCryptKey(32, false, true, true, false, true, $SETTINGS);
-        $otv_key = GenerateCryptKey(32, false, true, true, false, true, $SETTINGS);
+        $otv_code = GenerateCryptKey(32, false, true, true, false, true);
+        $otv_key = GenerateCryptKey(32, false, true, true, false, true);
 
         // Generate Defuse key
         $otv_user_code_encrypted = defuse_generate_personal_key($otv_key);
@@ -6537,7 +6642,7 @@ switch ($inputData['type']) {
                 $displayThisNode = false;
 
                 // Check if any allowed folder is part of the descendants of this node
-                $nodeDescendants = $tree->getDescendants($folder->id, true, false, true);
+                $nodeDescendants = $tree->getDescendantsFromTreeArray($folders, $folder->id);
                 foreach ($nodeDescendants as $node) {
                     // manage tree counters
                     if (
@@ -6563,15 +6668,14 @@ switch ($inputData['type']) {
                     array_push($arrayFolders, [
                         'id' => (int) $folder->id,
                         'level' => (int) $folder->nlevel,
-                        'title' => ((int) $folder->title === (int) $session->get('user-id') && (int) $folder->nlevel === 1) ? htmlspecialchars_decode($session->get('user-login')) : htmlspecialchars_decode($folder->title, ENT_QUOTES),
+                        'title' => ((int) $folder->title === (int) $session->get('user-id') && (int) $folder->nlevel === 1) ? $session->get('user-login') : $folder->title,
                         'disabled' => (
                             in_array($folder->id, $session->get('user-accessible_folders')) === false
                             || in_array($folder->id, $session->get('user-read_only_folders')) === true
-                            //|| ((int) $session->get('user-read_only') === 1 && in_array($folder->id, $session->get('user-personal_visible_folders')) === false)
                         ) ? 1 : 0,
                         'parent_id' => (int) $folder->parent_id,
                         'perso' => (int) $folder->personal_folder,
-                        'path' => $path,
+                        'path' => htmlspecialchars($path),
                         'is_visible_active' => (null !== $session->get('user-read_only_folders') && in_array($folder->id, $session->get('user-read_only_folders'))) ? 1 : 0,
                     ]);
                 }
@@ -6879,6 +6983,8 @@ switch ($inputData['type']) {
         );
 
         // notify Managers
+        $emailSettings = new EmailSettings($SETTINGS);
+        $emailService = new EmailService();
         $rows = DB::query(
             'SELECT email
             FROM ' . prefixTable('users') . '
@@ -6886,11 +6992,11 @@ switch ($inputData['type']) {
             1
         );
         foreach ($rows as $record) {
-            sendEmail(
+            $emailService->sendMail(
                 $lang->get('suggestion_notify_subject'),
                 str_replace(array('#tp_label#', '#tp_user#', '#tp_folder#'), array(addslashes($label), addslashes($resp_user['login']), addslashes($resp_folder['title'])), $lang->get('suggestion_notify_body')),
                 $record['email'],
-                $SETTINGS
+                $emailSettings
             );
         }
 
@@ -7222,128 +7328,12 @@ switch ($inputData['type']) {
         $inputData['userId'] = (int) filter_var($dataReceived['userId'], FILTER_SANITIZE_NUMBER_INT);
         $inputData['itemId'] = (int) filter_var($dataReceived['itemId'], FILTER_SANITIZE_NUMBER_INT);
         $inputData['treeId'] = (int) filter_var($dataReceived['treeId'], FILTER_SANITIZE_NUMBER_INT);
-        
-        // Locked Item (if already locked), go back and warn
-        $dataTmp = DB::queryFirstRow(
-            'SELECT timestamp, user_id 
-            FROM ' . prefixTable('items_edition') . ' 
-            WHERE item_id = %i',
-            $inputData['itemId']
-        );
 
-        // if token already exists for this item then no edition is possible
-        if (DB::count() > 0) {
-            // Get if current user is the one who locked the item
-            $userLockedItemQueryResults = DB::queryFirstRow(
-                'SELECT user_id 
-                FROM ' . prefixTable('items_edition') . ' 
-                WHERE item_id = %i AND user_id = %i',
-                $inputData['itemId'],
-                $session->get('user-id')
-            );
-            $userLockedItem = (DB::count() > 0) ? true : false;
-
-            // Get if existing process ongoing for this item
-            $dataItemProcessOngoing = DB::queryFirstRow(
-                'SELECT JSON_EXTRACT(p.arguments, "$.all_users_except_id") AS all_users_except_id
-                FROM ' . prefixTable('background_tasks') . ' AS p
-                INNER JOIN ' . prefixTable('items_edition') . ' AS i ON (i.item_id = p.item_id)
-                WHERE p.item_id = %i AND p.finished_at = ""
-                ORDER BY p.increment_id DESC',
-                $inputData['itemId']
-            );
-
-            // Get delay period
-            if (isset($SETTINGS['delay_item_edition']) && $SETTINGS['delay_item_edition'] > 0 && empty($dataTmp['timestamp']) === false) {
-                $delay = $SETTINGS['delay_item_edition']*60;
-            } else {
-                $delay = EDITION_LOCK_PERIOD; // One day delay
-            }
-            
-            if ((int) DB::count() === 0) {
-                // CASE where no encryption process is pending
-                if ($session->get('user-id') === $dataTmp['user_id'] || $userLockedItem === true || round(abs(time() - $dataTmp['timestamp']), 0) > $delay) {
-                    // CASE where user is the one who locked the item
-                    // Delete the existing edition lock and let the user edit
-                    DB::delete(
-                        prefixTable('items_edition'), 
-                        'item_id = %i AND user_id = %i', 
-                        $inputData['itemId'],
-                        $session->get('user-id')
-                    );
-                } else {
-                    // CASE where user is not the one who locked the item
-                    $editionLock = true;
-                }
-            } else {
-                // Case where encryption process is pending
-                // Block any user to edit the item
-                $editionLock = true;
-            }
-        }
-
-        $data = DB::queryFirstRow(
-            'SELECT visible_folders
-            FROM ' . prefixTable('cache_tree') . ' WHERE user_id = %i',
-            $inputData['userId']
-        );
-        // Check if tree ID is in visible folders.
-        $arr = json_decode($data['visible_folders'], true);
-        $ids = is_null($arr) === true ? [] : array_column($arr, 'id');
-
-        // Is folder in Read Only list for this user?
-        if (in_array($inputData['treeId'], $session->get('user-read_only_folders')) === true) {
-            $data = array(
-                'error' => false,
-                'access' => true,
-                'edit' => false,
-                'delete' => false,
-                'edition_locked' => false,
-            );
-
-            // send data
-            echo (string) prepareExchangedData(
-                $data,
-                'encode'
-            );
-            break;
-        }
-
-
-        // Check rights of this role on this folder
-        // Is there no edit or no delete defined
-        $edit = $delete = null;
-        $data = DB::queryFirstColumn(
-            'SELECT type
-            FROM ' . prefixTable('roles_values') . '
-            WHERE role_id IN %ls AND folder_id = %i',
-            array_column($session->get('system-array_roles'), 'id'),
+        // Check rights
+        $data = getCurrentAccessRights(
+            $inputData['userId'],
+            $inputData['itemId'],
             $inputData['treeId'],
-        );       
-        foreach ($data as $access) {
-            if ($access === 'ND') {
-                $delete = $delete === true ? true : false;
-            } elseif ($access === 'NE') {
-                $edit = $edit === true ? true : false;
-            } elseif ($access === 'NDNE') {
-                $edit = $edit === true ? true : false;
-                $delete = $delete === true ? true : false;
-            } elseif ($access === 'R') {
-                $edit = $edit === true ? true : false;
-                $delete = $delete === true ? true : false;
-            } elseif ($access === 'W') {
-                $edit = true;
-            }
-        }
-        if (LOG_TO_SERVER === true) error_log('TEAMPASS - Folder: '.$inputData['treeId'].' - User: '.$inputData['userId'].' - access: ' . $access . ' - edit: ' . $edit . ' - delete: ' . $delete);
-
-        $data = array(
-            'error' => false,
-            'access' => isset($inputData['treeId']) === true && in_array($inputData['treeId'], $ids) === true ? true : false,
-            'edit' => $edit,
-            'delete' => $delete,
-            'edition_locked' => $editionLock,
-            'debug' => 'read_only_folders',
         );
 
         // send data
@@ -7430,17 +7420,172 @@ function fileFormatImage($ext)
     return $image;
 }
 
-/**
- * Returns a cleaned up password.
- *
- * @param string $pwd String for pwd
- *
- * @return string
- */
-function passwordReplacement($pwd)
-{
-    $pwPatterns = array('/ETCOMMERCIAL/', '/SIGNEPLUS/');
-    $pwRemplacements = array('&', '+');
 
-    return preg_replace($pwPatterns, $pwRemplacements, $pwd);
+/**
+ * Get rights of user on specific folder/item.
+ * 
+ * @param int $userId ID of user.
+ * @param int $itemId ID of item.
+ * @param int $treeId ID of folder.
+ * 
+ * @return array with access rights.
+ */
+function getCurrentAccessRights(int $userId, int $itemId, int $treeId): array
+{
+    $session = SessionManager::getSession();
+    
+    // Check if the item is locked and whether the current user can edit it
+    $editionLock = isItemLocked($itemId, $session, $userId);
+
+    // Retrieve user's visible folders from the cache_tree table
+    $visibleFolders = getUserVisibleFolders($userId);
+
+    // Check if the folder is in the user's read-only list
+    if (in_array($treeId, $session->get('user-read_only_folders'))) {
+        return getAccessResponse(false, true, false, false);
+    }
+
+    // Check if the folder is personal to the user
+    foreach ($visibleFolders as $folder) {
+        if ($folder['id'] == $treeId && (int) $folder['perso'] === 1) {
+            return getAccessResponse(false, true, true, true);
+        }
+    }
+
+    // Determine the user's access rights based on their roles for this folder
+    [$edit, $delete] = getRoleBasedAccess($session, $treeId);
+
+    // Log access rights information if logging is enabled
+    if (LOG_TO_SERVER === true) {
+        error_log("TEAMPASS - Folder: $treeId - User: $userId - edit: $edit - delete: $delete");
+    }
+
+    return getAccessResponse(false, true, $edit, $delete, $editionLock);
 }
+
+/**
+ * Checks if the item is locked by another user or if there is an ongoing encryption process.
+ * If the item is locked, the function determines if the lock has expired or not.
+ * 
+ * @param int $itemId The ID of the item to check
+ * @param object $session The current session object
+ * @param int $userId The ID of the current user
+ * 
+ * @return bool True if the item is locked, false otherwise
+ */
+function isItemLocked(int $itemId, $session, int $userId): bool
+{
+    global $SETTINGS;
+
+    // Retrieve the current lock information for the item
+    $itemLockInfo = DB::queryFirstRow('SELECT timestamp, user_id FROM ' . prefixTable('items_edition') . ' WHERE item_id = %i', $itemId);
+
+    // Check if the item is locked by another user
+    if ($itemLockInfo && $itemLockInfo['user_id'] !== $userId) {
+        // Determine the delay period, using the setting or a default value
+        $delay = ($SETTINGS['delay_item_edition'] ?? EDITION_LOCK_PERIOD) * 60;
+        $lockExpired = (time() - $itemLockInfo['timestamp']) > $delay;
+
+        // If the lock hasn't expired, mark the item as locked
+        if (!$lockExpired) {
+            return true;
+        }
+
+        // If the lock has expired, remove the lock for the current user
+        DB::delete(prefixTable('items_edition'), 'item_id = %i AND user_id = %i', $itemId, $session->get('user-id'));
+    }
+    
+    // Check if there's an ongoing background encryption process for the item
+    $ongoingProcess = DB::queryFirstRow(
+        'SELECT 1 FROM ' . prefixTable('background_tasks') . ' WHERE item_id = %i AND finished_at = "" LIMIT 1', 
+        $itemId
+    );
+
+    // Return true if an ongoing process is found, otherwise false
+    return $ongoingProcess ? true : false;
+}
+
+/**
+ * Retrieves the list of visible folders for a specific user from the cache_tree table.
+ * 
+ * @param int $userId The ID of the user
+ * 
+ * @return array An array of visible folders for the user
+ */
+function getUserVisibleFolders(int $userId): array
+{
+    // Query to retrieve visible folders for the user
+    $data = DB::queryFirstRow('SELECT visible_folders FROM ' . prefixTable('cache_tree') . ' WHERE user_id = %i', $userId);
+    
+    // Decode JSON data into an array; return an empty array if the data is invalid
+    return json_decode($data['visible_folders'], true) ?? [];
+}
+
+/**
+ * Determines access rights (edit/delete) based on the user's roles for a given folder.
+ * It checks the roles_values table to see the permissions defined for each role.
+ * 
+ * @param object $session The current session object
+ * @param int $treeId The ID of the folder to check access rights for
+ * 
+ * @return array An array containing edit and delete access rights [edit, delete]
+ */
+function getRoleBasedAccess($session, int $treeId): array
+{
+    $edit = $delete = false;
+    
+    // Retrieve all role IDs assigned to the user
+    $roles = array_column($session->get('system-array_roles'), 'id');
+
+    // Query the access rights for the given roles and folder
+    $accessTypes = DB::queryFirstColumn(
+        'SELECT type FROM ' . prefixTable('roles_values') . ' WHERE role_id IN %ls AND folder_id = %i', 
+        $roles, 
+        $treeId
+    );
+
+    // Determine access rights based on the retrieved types
+    foreach ($accessTypes as $access) {
+        switch ($access) {
+            case 'ND': // No Delete
+                $edit = true;
+                $delete = false;
+                break;
+            case 'NE': // No Edit
+                $edit = false;
+                $delete = true;
+                break;
+            case 'NDNE':
+            case 'R': // Read only
+                $edit = $delete = false;
+                break;
+            case 'W': // Write access
+                $edit = $delete = true;
+                break;
+        }
+    }
+    return [$edit, $delete];
+}
+
+/**
+ * Constructs the final access response array with the given parameters.
+ * 
+ * @param bool $error Indicates if there was an error
+ * @param bool $access Indicates if the user has access
+ * @param bool $edit Indicates if the user has edit rights
+ * @param bool $delete Indicates if the user has delete rights
+ * @param bool $editionLocked Indicates if the edition is locked
+ * 
+ * @return array An array containing the access rights information
+ */
+function getAccessResponse(bool $error, bool $access, bool $edit, bool $delete, bool $editionLocked = false): array
+{
+    return [
+        'error' => $error,
+        'access' => $access,
+        'edit' => $edit,
+        'delete' => $delete,
+        'edition_locked' => $editionLocked,
+    ];
+}
+

@@ -33,7 +33,7 @@ declare(strict_types=1);
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 
 // Load functions
@@ -42,14 +42,14 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 if ($session->get('key') === null) {
     die('Hacking attempt...');
 }
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -373,7 +373,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                             '<?php echo $lang->get('server_answer_error') . '<br />' . $lang->get('server_returned_data') . ':<br />'; ?>' + data.error,
                             '', {
                                 closeButton: true,
-                                positionClass: 'toastr-top-right'
+                                positionClass: 'toast-bottom-right'
                             }
                         );
                         return false;
@@ -506,7 +506,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                             '<?php echo $lang->get('server_answer_error') . '<br />' . $lang->get('server_returned_data') . ':<br />'; ?>' + data.error,
                             '', {
                                 closeButton: true,
-                                positionClass: 'toastr-top-right'
+                                positionClass: 'toast-bottom-right'
                             }
                         );
                         manuelTaskIsRunning = false;
@@ -535,7 +535,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                             '<?php echo $lang->get('error'); ?>',
                             data.output, {
                                 closeButton: true,
-                                positionClass: 'toastr-top-right'
+                                positionClass: 'toast-bottom-right'
                             }
                         );
                     }
@@ -567,7 +567,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                         '<?php echo $lang->get('server_answer_error') . '<br />' . $lang->get('server_returned_data') . ':<br />'; ?>' + data.error,
                         '', {
                             closeButton: true,
-                            positionClass: 'toastr-top-right'
+                            positionClass: 'toast-bottom-right'
                         }
                     );
                     return false;

@@ -31,7 +31,7 @@ declare(strict_types=1);
 
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use EZimuel\PHPSecureSession;
 use TeampassClasses\PerformChecks\PerformChecks;
@@ -46,10 +46,10 @@ $session = SessionManager::getSession();
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -189,7 +189,7 @@ if (null !== $post_type) {
 
             if (empty($return) === false) {
                 // get a token
-                $token = GenerateCryptKey(20, false, true, true, false, true, $SETTINGS);
+                $token = GenerateCryptKey(20, false, true, true, false, true);
 
                 //save file
                 $filename = time() . '-' . $token . '.sql';
@@ -220,7 +220,7 @@ if (null !== $post_type) {
                 }
 
                 //generate 2d key
-                $session->set('user-key_tmp', GenerateCryptKey(16, false, true, true, false, true, $SETTINGS));
+                $session->set('user-key_tmp', GenerateCryptKey(16, false, true, true, false, true));
 
                 //update LOG
                 logEvents(

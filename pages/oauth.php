@@ -29,14 +29,13 @@ declare(strict_types=1);
  * @see       https://www.teampass.net
  */
 
-
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
-use TeampassClasses\AzureAuthController\AzureAuthController;
+use TeampassClasses\OAuth2Controller\OAuth2Controller;
 
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -44,10 +43,10 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -116,7 +115,15 @@ $ldap_type = $SETTINGS['ldap_type'] ?? '';
                     <form role='form-horizontal'>
                         <div class='card-body'>
 
-                            <div class='row mb-5'>
+                            <div class='row mb-2'>
+                                <div class='col-12'>
+                                    <div class="alert alert-warning" role="alert">
+                                    <i class="fa-solid fa-flask-vial mr-3"></i>Expiremental feature. Use at your own risk.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class='row mb-2'>
                                 <div class='col-10'>
                                     <?php echo $lang->get('settings_oauth_mode'); ?>
                                     <small id='passwordHelpBlock' class='form-text text-muted'>
@@ -125,6 +132,18 @@ $ldap_type = $SETTINGS['ldap_type'] ?? '';
                                 </div>
                                 <div class='col-2'>
                                     <div class='toggle toggle-modern' id='oauth2_enabled' data-toggle-on='<?php echo isset($SETTINGS['oauth2_enabled']) === true && (int) $SETTINGS['oauth2_enabled'] === 1 ? 'true' : 'false'; ?>'></div><input type='hidden' id='oauth2_enabled_input' value='<?php echo isset($SETTINGS['oauth2_enabled']) && (int) $SETTINGS['oauth2_enabled'] === 1 ? 1 : 0; ?>'>
+                                </div>
+                            </div>
+
+                            <div class='row mb-2'>
+                                <div class='col-10'>
+                                    <?php echo $lang->get('settings_oauth_auto_login'); ?>
+                                    <small id='passwordHelpBlock' class='form-text text-muted'>
+                                        <?php echo $lang->get('settings_oauth_auto_login_tip'); ?>
+                                    </small>
+                                </div>
+                                <div class='col-2'>
+                                    <div class='toggle toggle-modern' id='oauth2_auto_login' data-toggle-on='<?php echo isset($SETTINGS['oauth2_auto_login']) === true && (int) $SETTINGS['oauth2_auto_login'] === 1 ? 'true' : 'false'; ?>'></div><input type='hidden' id='oauth2_auto_login_input' value='<?php echo isset($SETTINGS['oauth2_auto_login']) && (int) $SETTINGS['oauth2_auto_login'] === 1 ? 1 : 0; ?>'>
                                 </div>
                             </div>
 
@@ -148,7 +167,7 @@ $ldap_type = $SETTINGS['ldap_type'] ?? '';
                                     </small>
                                 </div>
                                 <div class='col-7'>
-                                    <input type='text' class='form-control form-control-sm setting-oauth' id='oauth2_callback_url' value='<?php echo $SETTINGS['cpassman_url']; ?>'>
+                                    <input type='text' class='form-control form-control-sm setting-oauth' id='oauth2_callback_url' value='<?php echo $SETTINGS['cpassman_url'].'/'.OAUTH2_REDIRECTURI; ?>' disabled>
                                 </div>
                             </div>
 
@@ -172,13 +191,34 @@ $ldap_type = $SETTINGS['ldap_type'] ?? '';
 
                             <div class='row mb-2 tr-ldap'>
                                 <div class='col-5'>
+                                    <?php echo $lang->get('tenant_id'); ?>
+                                </div>
+                                <div class='col-7'>
+                                    <input type='text' class='form-control form-control-sm setting-oauth' id='oauth2_tenant_id' value='<?php echo $SETTINGS['oauth2_tenant_id'] ?? ''; ?>'>
+                                </div>
+                            </div>
+
+                            <div class='row mb-2 tr-ldap'>
+                                <div class='col-5'>
+                                    <?php echo $lang->get('oauth2_client_urlResourceOwnerDetails'); ?>
+                                    <small id='passwordHelpBlock' class='form-text text-muted'>
+                                        <?php echo $lang->get('oauth2_client_urlResourceOwnerDetails_tip'); ?>
+                                    </small>
+                                </div>
+                                <div class='col-7'>
+                                    <input type='text' class='form-control form-control-sm setting-oauth' id='oauth2_client_urlResourceOwnerDetails' value='<?php echo $SETTINGS['oauth2_client_urlResourceOwnerDetails'] ?? ''; ?>'>
+                                </div>
+                            </div>
+
+                            <div class='row mb-2 tr-ldap'>
+                                <div class='col-5'>
                                     <?php echo $lang->get('scopes'); ?>
                                     <small id='passwordHelpBlock' class='form-text text-muted'>
                                         <?php echo $lang->get('scopes_tip'); ?>
                                     </small>
                                 </div>
                                 <div class='col-7'>
-                                    <input type='text' class='form-control form-control-sm setting-oauth' id='oauth2_client_scopes' value='<?php echo $SETTINGS['oauth2_client_scopes'] ?? 'openid,email,profile'; ?>'>
+                                    <input type='text' class='form-control form-control-sm setting-oauth' id='oauth2_client_scopes' value='<?php echo $SETTINGS['oauth2_client_scopes'] ?? 'openid,profile,email,User.Read,Group.Read.All'; ?>'>
                                 </div>
                             </div>
 
@@ -208,51 +248,6 @@ $ldap_type = $SETTINGS['ldap_type'] ?? '';
 
                             </div>
 
-                        </form>
-                    </div>
-
-                    <div class='card card-primary'>
-                        <div class='card-header'>
-                            <h3 class='card-title'><?php echo $lang->get('setup_wizard'); ?></h3>
-                        </div>
-                        <!-- /.card-header -->
-                        <!-- form start -->
-                        <form role='form-horizontal'>
-                            <div class='card-body'>
-                                <div class='tab-content mt-2' id=''>
-                                    <div class='row mb-2'>
-                                        <button type='button' class='btn btn-primary btn-sm  mr-2' id='but_perform_setup'>
-                                            <i class='fas fa-cog mr-2'></i><?php echo $lang->get('perform'); ?>
-                                        </button>
-                                    </div>
-                                    <div class='row mb-2'>
-                                        <div class='col-8'>
-<?php
-if (isset($_GET['code']) === true && isset($_GET['state']) === true) {
-    $get['code'] = filter_var($_GET['code'], FILTER_SANITIZE_SPECIAL_CHARS);
-    $get['state'] = filter_var($_GET['state'], FILTER_SANITIZE_SPECIAL_CHARS);
-    $get['session_state'] = filter_var($_GET['session_state'], FILTER_SANITIZE_SPECIAL_CHARS);
-
-    error_log('---- CALLBACK ----');
-
-    // Création d'une instance du contrôleur
-    $azureAuth = new AzureAuthController($SETTINGS, true);
-
-    // Traitement de la réponse de callback Azure
-    $azureAuth->getAllGroups();//callbackSetup();
-
-
-} 
-?>
-                                        </div>
-                                        <div class='col-4'>
-                                            
-                                        </div>
-                                    </div>
-                                       
-                                </div>
-
-                            </div>
                         </form>
                     </div>
                 

@@ -32,19 +32,19 @@ use TiBeN\CrontabManager\CrontabJob;
 use TiBeN\CrontabManager\CrontabAdapter;
 use TiBeN\CrontabManager\CrontabRepository;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 // Do checks
@@ -233,15 +233,9 @@ catch (Exception $e) {
                                             <button class="btn btn-primary task-define" data-task="users_personal_folder_task">
                                                 <i class="fa-solid fa-cogs"></i>
                                             </button>
-                                            <?php
-                                            if (defined('WIP') === true && WIP === true) {
-                                                ?>
                                             <button class="btn btn-primary task-perform ml-1" data-task="users_personal_folder_task">
                                                 <i class="fa-solid fa-play"></i>
                                             </button>
-                                            <?php
-                                            }
-                                            ?>
                                         </div>
                                     </div>
 
@@ -284,28 +278,6 @@ catch (Exception $e) {
                                                 <i class="fa-solid fa-cogs"></i>
                                             </button>
                                             <button class="btn btn-primary task-perform ml-1" data-task="purge_temporary_files_task">
-                                                <i class="fa-solid fa-play"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <div class='row ml-1 mb-2'>
-                                        <div class='col-8'>
-                                            <i class="fa-solid fa-sliders ml-4 mr-2"></i><span id="rebuild_config_file_task_text"><?php echo $lang->get('rebuild_config_file'); ?></span>
-                                            <span class="badge badge-secondary ml-2" id="rebuild_config_file_task_badge"></span>
-                                        </div>
-                                        <div class='col-2'>
-                                            <?php
-                                            $task = isset($SETTINGS['rebuild_config_file_task']) === true ? explode(";", $SETTINGS['rebuild_config_file_task']) : [];
-                                            ?>
-                                            <input type='text' disabled class='form-control form-control-sm' id='rebuild_config_file_task_parameter' value='<?php echo (isset($task[0]) === true && empty($task[0]) === false && count($task) === 3) ? $lang->get($task[0])." ".(isset($task[2]) === true ? strtolower($lang->get('day')).' '.$task[2].' ' : '').$lang->get('at')." ".(isset($task[1]) === true ? $task[1] : '') : $lang->get('not_defined') ?>'>
-                                            <input type='hidden' disabled class='form-control form-control-sm' id='rebuild_config_file_task_parameter_value' value='<?php echo isset($task[0]) === true ? $task[0].";".(isset($task[1]) === true ? $task[1] : '').(isset($task[2]) === true ? $task[2] : '') : ''; ?>'>
-                                        </div>
-                                        <div class='col-2'>
-                                            <button class="btn btn-primary task-define" data-task="rebuild_config_file_task">
-                                                <i class="fa-solid fa-cogs"></i>
-                                            </button>
-                                            <button class="btn btn-primary task-perform ml-1" data-task="rebuild_config_file_task">
                                                 <i class="fa-solid fa-play"></i>
                                             </button>
                                         </div>
@@ -387,6 +359,18 @@ catch (Exception $e) {
                                         </div>
                                         <div class='col-2'>
                                             <input type='number' class='form-control form-control-sm' id='maximum_number_of_items_to_treat' value='<?php echo isset($SETTINGS['maximum_number_of_items_to_treat']) === true ? $SETTINGS['maximum_number_of_items_to_treat'] : NUMBER_ITEMS_IN_BATCH; ?>'>
+                                        </div>
+                                    </div>
+
+                                    <div class='row mb-3 option'>
+                                        <div class='col-10'>
+                                        <h5><i class="fa-solid fa-database mr-2"></i><?php echo $lang->get('number_users_build_cache_tree'); ?></h5>
+                                            <small id='passwordHelpBlock' class='form-text text-muted'>
+                                                <?php echo $lang->get('number_users_build_cache_tree_tip'); ?>
+                                            </small>
+                                        </div>
+                                        <div class='col-2'>
+                                            <input type='number' class='form-control form-control-sm' id='number_users_build_cache_tree' value='<?php echo isset($SETTINGS['number_users_build_cache_tree']) === true ? $SETTINGS['number_users_build_cache_tree'] : 10; ?>'>
                                         </div>
                                     </div>
 

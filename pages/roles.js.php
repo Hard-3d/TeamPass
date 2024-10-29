@@ -32,7 +32,7 @@ declare(strict_types=1);
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -40,14 +40,14 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 if ($session->get('key') === null) {
     die('Hacking attempt...');
 }
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -137,7 +137,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
 
             // Prepare card header
             $('#role-detail-header').html(
-                $(this).find(':selected').text() +
+                $('<div>').text($(this).find(':selected').text()).html() +
                 ' <i class="' + $(this).find(':selected').data('complexity-icon') + ' infotip ml-3" ' +
                 'title="<?php echo $lang->get('complexity'); ?>: ' +
                 $(this).find(':selected').data('complexity-text') + '"></i>' +
@@ -257,7 +257,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                     $('.infotip').tooltip();
 
                     // Adapt select
-                    $('#folders-depth').val('').change();
+                    $('#folders-depth').empty().change();
                     $('#folders-depth').append('<option value="all"><?php echo $lang->get('all'); ?></option>');
                     for (x = 1; x < max_folder_depth; x++) {
                         $('#folders-depth').append('<option value="' + x + '">' + x + '</option>');
@@ -620,6 +620,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
         } else if ($(this).data('action') === 'delete' && $('#button-delete').hasClass('disabled') === false) {
             // SHOW ROLE DELETION FORM
             if ($('#card-role-details').hasClass('hidden') === false) {
+                selectedFolderText = $('<div>').text(selectedFolderText).html();
                 $('#span-role-delete').html('- <?php echo $lang->get('role'); ?> <b>' + selectedFolderText + '</b>');
 
                 $('#card-role-deletion').removeClass('hidden');

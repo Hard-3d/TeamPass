@@ -32,7 +32,7 @@ use TiBeN\CrontabManager\CrontabJob;
 use TiBeN\CrontabManager\CrontabAdapter;
 use TiBeN\CrontabManager\CrontabRepository;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
@@ -42,11 +42,11 @@ require_once __DIR__.'/../sources/main.functions.php';
 
 // init
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 loadClasses('DB');
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -245,6 +245,11 @@ catch (Exception $e) {
                                 Remaining users: '.DB::count().'
                             </div>';
                         }
+
+                        // Check if tp.config.php file is still present
+                        if (file_exists(__DIR__.'/../includes/config/tp.config.php') === true) {
+                            echo '<div class="mt-3 alert alert-warning" role="alert"><i class="fa-solid fa-circle-exclamation mr-2"></i>File tp.config.php requires to be deleted. Please do it and refresh this page. This warning shall not be visible anymore.</div>';
+                        }
 ?>
                     </div>
                     <!-- /.card-body -->
@@ -300,7 +305,7 @@ catch (Exception $e) {
                         }
 
                         // Test internet access
-                        $connected = @fsockopen("www.google.com", 80); // Le site web est google et le port est 80 (HTTP)
+                        $connected = @fsockopen("www.cloudflare.com", 443, $errno, $errstr, 1); // API Duo API (MFA).
                         if ($connected){
                             fclose($connected);
                             $internetAccess = '

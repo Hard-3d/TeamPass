@@ -33,7 +33,7 @@ declare(strict_types=1);
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -41,14 +41,14 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 if ($session->get('key') === null) {
     die('Hacking attempt...');
 }
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -495,7 +495,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
         runtimes: "gears,html5,flash,silverlight,browserplus",
         browse_button: "import-keepass-attach-pickfile-keepass",
         container: "import-keepass-upload-zone",
-        max_file_size: "10mb",
+        max_file_size: "20mb",
         chunk_size: "0",
         unique_names: true,
         dragdrop: true,
@@ -723,12 +723,15 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                                     // Isolate first item
                                     if (itemsList.length > 0) {
                                         $('#import-feedback-progress-text')
-                                            .html('<i class="fas fa-cog fa-spin ml-4 mr-2"></i><?php echo $lang->get('operation_progress');?> ('+((counter*100)/itemsNumber).toFixed(2)+'%) - <i>'+itemsList[0].Title + '</i>');
+                                            .html('<i class="fas fa-cog fa-spin ml-4 mr-2"></i><?php echo $lang->get('operation_progress');?> ('+((counter*100)/itemsNumber).toFixed(2)+'%) - <i id="item-title"></i>');
+
+                                        // XSS Filtering :
+                                        $('#import-feedback-progress-text').text(itemsList[0].Title);
 
                                         data = {
                                             'edit-all': $('#import-keepass-edit-all-checkbox').prop('checked') === true ? 1 : 0,
                                             'edit-role': $('#import-keepass-edit-role-checkbox').prop('checked') === true ? 1 : 0,
-                                            'items': itemsToAdd[0],
+                                            'items': itemsToAdd.slice(0, 500),
                                             'folders': foldersList,
                                         }
                                         if (debugJavascript === true) {
@@ -768,7 +771,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                                                     $('#import-feedback-result').append(data.info+"<br>");
 
                                                     // Remove item from list
-                                                    itemsToAdd.shift();
+                                                    itemsToAdd.splice(0, 500);
 
                                                     // Do recursive call until step = finished
                                                     counter++

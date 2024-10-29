@@ -29,6 +29,7 @@
 use EZimuel\PHPSecureSession;
 use TeampassClasses\SuperGlobal\SuperGlobal;
 use TeampassClasses\Language\Language;
+use TeampassClasses\ConfigManager\ConfigManager;
 
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -41,13 +42,16 @@ error_reporting(E_ERROR | E_PARSE);
 set_time_limit(600);
 $_SESSION['CPM'] = 1;
 
+// Load config
+$configManager = new ConfigManager();
+$SETTINGS = $configManager->getAllSettings();
+
 //include librairies
 require_once __DIR__.'/../includes/language/english.php';
 require_once __DIR__.'/../includes/config/include.php';
 require_once __DIR__.'/../includes/config/settings.php';
 require_once __DIR__.'/tp.functions.php';
 require_once __DIR__.'/libs/aesctr.php';
-require_once __DIR__.'/../includes/config/tp.config.php';
 
 // Prepare POST variables
 $post_nb = filter_input(INPUT_POST, 'nb', FILTER_SANITIZE_NUMBER_INT);
@@ -73,24 +77,17 @@ $database = DB_NAME;
 $port = DB_PORT;
 $user = DB_USER;
 
-if (mysqli_connect(
+$db_link = mysqli_connect(
     $server,
     $user,
     $pass,
     $database,
     $port
-)) {
-    $db_link = mysqli_connect(
-        $server,
-        $user,
-        $pass,
-        $database,
-        $port
-    );
+);
+if ($db_link) {
+    $db_link->set_charset(DB_ENCODING);
 } else {
-    $res = 'Impossible to get connected to server. Error is: ' . addslashes(mysqli_connect_error());
     echo '[{"finish":"1", "msg":"", "error":"Impossible to get connected to server. Error is: ' . addslashes(mysqli_connect_error()) . '!"}]';
-    mysqli_close($db_link);
     exit();
 }
 
@@ -101,6 +98,9 @@ if (isset($post_operation) === true && empty($post_operation) === false && strpo
     if ($post_operation === '20230604_1') {
         // ---->
         // OPERATION - 20230604_1 - generate key for item_key
+
+        // Start transaction to avoid autocommit
+        mysqli_begin_transaction($db_link, MYSQLI_TRANS_START_READ_WRITE);
 
         // Get items to treat
         $rows = mysqli_query(
@@ -113,6 +113,8 @@ if (isset($post_operation) === true && empty($post_operation) === false && strpo
         // Handle error on query
         if (!$rows) {
             echo '[{"finish":"1" , "error":"'.mysqli_error($db_link).'"}]';
+            mysqli_commit($db_link);
+            mysqli_close($db_link);
             exit();
         }
 
@@ -131,6 +133,8 @@ if (isset($post_operation) === true && empty($post_operation) === false && strpo
                 );
                 if (mysqli_error($db_link)) {
                     echo '[{"finish":"1", "next":"", "error":"MySQL Error! '.addslashes(mysqli_error($db_link)).'"}]';
+                    mysqli_commit($db_link);
+                    mysqli_close($db_link);
                     exit();
                 }
             }
@@ -144,7 +148,7 @@ if (isset($post_operation) === true && empty($post_operation) === false && strpo
         }
         // ----<
     } elseif ($post_operation === 'populateItemsTable_CreatedAt') {
-        $finish = populateItemsTable_CreatedAt($pre, $post_nb);
+        $finish = populateItemsTable_CreatedAt($pre);
     } elseif ($post_operation === 'populateItemsTable_UpdatedAt') {
         $finish = populateItemsTable_UpdatedAt($pre);
     } elseif ($post_operation === 'populateItemsTable_DeletedAt') {
@@ -158,44 +162,57 @@ if (isset($post_operation) === true && empty($post_operation) === false && strpo
     }
     // Return back
     echo '[{"finish":"'.$finish.'" , "next":"", "error":"", "total":"'.$total.'"}]';
+    // Commit transaction.
+    mysqli_commit($db_link);
 }
 
 
-function populateItemsTable_CreatedAt($pre, $post_nb)
+function populateItemsTable_CreatedAt($pre)
 {
     global $db_link;
+
     // loop on items - created_at
     $items = mysqli_query(
         $db_link,
         "select i.id as id, ls.date as datetime
         from `" . $pre . "items` as i
         inner join `" . $pre . "log_items` as ls on ls.id_item = i.id
-        WHERE ls.action = 'at_creation' AND i.created_at IS NULL
-        LIMIT " . $post_nb.";"
+        WHERE ls.action = 'at_creation' AND i.created_at IS NULL;"
     );
+
+    // Empty lists
+    $updateCases = [];
+    $ids = [];
+
+    // Generate lists of items to update
     while ($item = mysqli_fetch_assoc($items)) {
         if (empty((string) $item['datetime']) === false && is_null($item['datetime']) === false) {
-            // update created_at field
-            mysqli_query(
-                $db_link,
-                "UPDATE `" . $pre . "items` SET created_at = '".$item['datetime']."' WHERE id = ".$item['id']
-            );
+            $ids[] = $item['id'];
+            $updateCases[] = "WHEN id = " . $item['id'] . " THEN '" . $item['datetime'] . "'";
         }
     }
 
-    // Is it finished?
-    $remainingItems = mysqli_num_rows(
-        mysqli_query(
-            $db_link,
-            "SELECT * FROM `" . $pre . "items` WHERE created_at IS NULL"
-        )
-    );
-    return $remainingItems > 0 ? 0 : 1;
+    // Update table in unique query
+    if (!empty($ids)) {
+        $idsList = implode(',', $ids);
+        $updateQuery = "
+            UPDATE `" . $pre . "items`
+            SET created_at = CASE " . implode(' ', $updateCases) . " END
+            WHERE id IN (" . $idsList . ")
+        ";
+        mysqli_query($db_link, $updateQuery);
+    }
+
+    // All items are processed.
+    return 1;
 }
 
 function populateItemsTable_UpdatedAt($pre)
 {
     global $db_link;
+    // Start transaction to avoid autocommit
+    mysqli_begin_transaction($db_link, MYSQLI_TRANS_START_READ_WRITE);
+
     // loop on items - updated_at
     $items = mysqli_query(
         $db_link,
@@ -212,12 +229,18 @@ function populateItemsTable_UpdatedAt($pre)
         }
     }
 
+    // Commit transaction.
+    mysqli_commit($db_link);
+
     return 1;
 }
 
 function populateItemsTable_DeletedAt($pre)
 {
     global $db_link;
+    // Start transaction to avoid autocommit
+    mysqli_begin_transaction($db_link, MYSQLI_TRANS_START_READ_WRITE);
+
     // loop on items - deleted_at
     $items = mysqli_query(
         $db_link,
@@ -233,6 +256,9 @@ function populateItemsTable_DeletedAt($pre)
             );
         }
     }
+
+    // Commit transaction.
+    mysqli_commit($db_link);
 
     return 1;
 }
@@ -273,6 +299,9 @@ function installPurgeUnnecessaryKeys(bool $allUsers = true, int $user_id=0, stri
 function installPurgeUnnecessaryKeysForUser(int $user_id=0, string $pre)
 {
     global $db_link;
+    // Start transaction to avoid autocommit
+    mysqli_begin_transaction($db_link, MYSQLI_TRANS_START_READ_WRITE);
+
     if ($user_id === 0) {
         return;
     }
@@ -319,6 +348,9 @@ function installPurgeUnnecessaryKeysForUser(int $user_id=0, string $pre)
             WHERE object_id IN ('.$pfItemsList.') AND user_id NOT IN ('.TP_USER_ID.', '.$user_id.')'
         );
     }
+
+    // Commit transaction.
+    mysqli_commit($db_link);
 }
 
 
@@ -429,83 +461,4 @@ function installHandleFoldersCategories(
     }
     
     mysqli_close($mysqli2);
-}
-
-/**
- * Permits to handle the Teampass config file
- * $action accepts "rebuild" and "update"
- *
- * @param string $action   Action to perform
- * @param array  $SETTINGS Teampass settings
- * @param string $field    Field to refresh
- * @param string $value    Value to set
- *
- * @return string|bool
- */
-function installHandleConfigFile($action, $SETTINGS, $field = null, $value = null)
-{
-    $tp_config_file = $SETTINGS['cpassman_dir'] . '/includes/config/tp.config.php';
-    $filename = '../includes/config/settings.php';
-    include_once '../sources/main.functions.php';
-    $pass = defuse_return_decrypted(DB_PASSWD);
-    $server = DB_HOST;
-    $pre = DB_PREFIX;
-    $database = DB_NAME;
-    $port = intval(DB_PORT);
-    $user = DB_USER;
-    $arr_data = array();
-    $mysqli2 = new mysqli($server, $user, $pass, $database, $port);
-
-    if (file_exists($tp_config_file) === false || $action === 'rebuild') {
-        // perform a copy
-        if (file_exists($tp_config_file)) {
-            if (! copy($tp_config_file, $tp_config_file . '.' . date('Y_m_d_His', time()))) {
-                return "ERROR: Could not copy file '" . $tp_config_file . "'";
-            }
-        }
-
-        // regenerate
-        $data = [];
-        $data[0] = "<?php\n";
-        $data[1] = "global \$SETTINGS;\n";
-        $data[2] = "\$SETTINGS = array (\n";
-
-        $result = $mysqli2->query('SELECT *
-            FROM ' . $pre . 'misc
-            WHERE type = "admin"'
-        );
-        $rowcount = $result->num_rows;
-        if ($rowcount > 0) {
-            while ($row = $result->fetch_assoc()) {
-                array_push($data, "    '" . $row['intitule'] . "' => '" . htmlspecialchars_decode($row['valeur'], ENT_COMPAT) . "',\n");
-            }
-        }
-        array_push($data, ");\n");
-        $data = array_unique($data);
-    // ---
-    } elseif ($action === 'update' && empty($field) === false) {
-        $data = file($tp_config_file);
-        $inc = 0;
-        $bFound = false;
-        foreach ($data as $line) {
-            if (stristr($line, ');')) {
-                break;
-            }
-
-            if (stristr($line, "'" . $field . "' => '")) {
-                $data[$inc] = "    '" . $field . "' => '" . htmlspecialchars_decode($value ?? '', ENT_COMPAT) . "',\n";
-                $bFound = true;
-                break;
-            }
-            ++$inc;
-        }
-        if ($bFound === false) {
-            $data[$inc] = "    '" . $field . "' => '" . htmlspecialchars_decode($value ?? '', ENT_COMPAT). "',\n);\n";
-        }
-    }
-    mysqli_close($mysqli2);
-
-    // update file
-    file_put_contents($tp_config_file, implode('', $data ?? []));
-    return true;
 }

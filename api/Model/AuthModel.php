@@ -2,35 +2,39 @@
 /**
  * Teampass - a collaborative passwords manager.
  * ---
- * This library is distributed in the hope that it will be useful,
+ * This file is part of the TeamPass project.
+ * 
+ * TeamPass is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3 of the License.
+ * 
+ * TeamPass is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ * 
+ * Certain components of this file may be under different licenses. For
+ * details, see the `licenses` directory or individual file headers.
  * ---
- *
- * @project   Teampass
  * @version    API
  *
  * @file      AuthModel.php
- * ---
- *
  * @author    Nils Laumaillé (nils@teampass.net)
- *
  * @copyright 2009-2024 Teampass.net
- *
- * @license   https://spdx.org/licenses/GPL-3.0-only.html#licenseText GPL-3.0
- * ---
- *
+ * @license   GPL-3.0
  * @see       https://www.teampass.net
  */
+
 use TeampassClasses\PasswordManager\PasswordManager;
 use TeampassClasses\NestedTree\NestedTree;
+use TeampassClasses\ConfigManager\ConfigManager;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
-require_once API_ROOT_PATH . "/Model/Database.php";
-
-
-class AuthModel extends Database
+class AuthModel
 {
 
 
@@ -53,71 +57,31 @@ class AuthModel extends Database
                 'apikey' => isset($apikey) === true ? $apikey : '',
             ],
             [
-                'login' => 'trim|escape',
+                'login' => 'trim|escape|strip_tags',
                 'password' => 'trim|escape',
-                'apikey' => 'trim|escape',
+                'apikey' => 'trim|escape|strip_tags',
             ]
         );
-        if (empty($inputData['login']) === true || empty($inputData['apikey']) === true) {
-            return ["error" => "Login failed.", "info" => "Empty entry"];
-        }
-        
-        // Check apikey
-        if (empty($inputData['password']) === true) {
+
+        // Check apikey and credentials
+        if (empty($inputData['login']) === true || empty($inputData['apikey']) === true || empty($inputData['password']) === true) {
             // case where it is a generic key
-            $apiInfo = $this->select("SELECT * FROM " . prefixTable('api') . " WHERE value='".$inputData['apikey']."' AND label='".$inputData['login']."'");
-            $apiInfo = $apiInfo[0];
-            if (WIP === true) {
-                if (isset($apiInfo['increment_id']) === false) {
-                    return ["error" => "Login failed.", "info" => "apikey : Not valid"];
-                }
+            // Not allowed to use this API
 
-                // Check if user is enabled
-                if ((int) $apiInfo['enabled'] === 0) {
-                    return ["error" => "Login failed.", "info" => "User not allowed to use API"];
-                }
-
-                // Log user
-                include API_ROOT_PATH . '/../includes/config/tp.config.php';
-                logEvents($SETTINGS, 'api', 'user_connection', (string) $apiInfo['increment_id'], stripslashes($inputData['login']));
-
-                // create JWT
-                return $this->createUserJWT(
-                    $apiInfo['increment_id'],
-                    $inputData['login'],
-                    0,
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    0,
-                    0,
-                    1,
-                    0,
-                    '',
-                    $apiInfo['allowed_folders'],
-                    $apiInfo['allowed_to_create'],
-                    $apiInfo['allowed_to_read'],
-                    $apiInfo['allowed_to_update'],
-                    $apiInfo['allowed_to_delete'],
-                );
-            } else {
-                return ["error" => "Login failed.", "info" => "Not managed."];
-            }
+            return ["error" => "Login failed.", "info" => "User password is requested"];
         } else {
             // case where it is a user api key
             // Check if user exists
-            $userInfoRes = $this->select(
+            $userInfo = DB::queryfirstrow(
                 "SELECT u.id, u.pw, u.login, u.admin, u.gestionnaire, u.can_manage_all_users, u.fonction_id, u.can_create_root_folder, u.public_key, u.private_key, u.personal_folder, u.fonction_id, u.groupes_visibles, u.groupes_interdits, a.value AS user_api_key, a.allowed_folders as user_api_allowed_folders, a.enabled, a.allowed_to_create, a.allowed_to_read, a.allowed_to_update, a.allowed_to_delete
                 FROM " . prefixTable('users') . " AS u
                 INNER JOIN " . prefixTable('api') . " AS a ON (a.user_id=u.id)
-                WHERE login='".$inputData['login']."'");
-            if (count($userInfoRes) === 0) {
+                WHERE login = %s",
+                $inputData['login']
+            );
+            if (DB::count() === 0) {
                 return ["error" => "Login failed.", "info" => "apikey : Not valid"];
             }
-            $userInfoRes[0]['special'] = '';
-            $userInfo = $userInfoRes[0];
 
             // Check if user is enabled
             if ((int) $userInfo['enabled'] === 0) {
@@ -138,39 +102,45 @@ class AuthModel extends Database
 
                 // Update user's key_tempo
                 $keyTempo = bin2hex(random_bytes(16));
-                $this->update(
-                    "UPDATE " . prefixTable('users') . "
-                    SET key_tempo='".$keyTempo."'
-                    WHERE id=".$userInfo['id']
+                DB::update(
+                    prefixTable('users'),
+                    [
+                        'key_tempo' => $keyTempo,
+                    ],
+                    'id = %i',
+                    $userInfo['id']
                 );
                 
                 // get user folders list
                 $ret = $this->buildUserFoldersList($userInfo);
 
+                // Load config
+                $configManager = new ConfigManager();
+                $SETTINGS = $configManager->getAllSettings();
+
                 // Log user
-                include API_ROOT_PATH . '/../includes/config/tp.config.php';
                 logEvents($SETTINGS, 'api', 'user_connection', (string) $userInfo['id'], stripslashes($userInfo['login']));
 
                 // create JWT
                 return $this->createUserJWT(
-                    $userInfo['id'],
-                    $inputData['login'],
-                    $userInfo['personal_folder'],
-                    $userInfo['public_key'],
-                    $privateKeyClear,
-                    implode(",", $ret['folders']),
-                    implode(",", $ret['items']),
-                    $keyTempo,
-                    $userInfo['admin'],
-                    $userInfo['gestionnaire'],
-                    $userInfo['can_create_root_folder'],
-                    $userInfo['can_manage_all_users'],
-                    $userInfo['fonction_id'],
-                    $userInfo['user_api_allowed_folders'],
-                    $userInfo['allowed_to_create'],
-                    $userInfo['allowed_to_read'],
-                    $userInfo['allowed_to_update'],
-                    $userInfo['allowed_to_delete'],
+                    (int) $userInfo['id'],
+                    (string) $inputData['login'],
+                    (int) $userInfo['personal_folder'],
+                    (string) $userInfo['public_key'],
+                    (string) $privateKeyClear,
+                    (string) implode(",", $ret['folders']),
+                    (string) implode(",", $ret['items']),
+                    (string) $keyTempo,
+                    (int) $userInfo['admin'],
+                    (int) $userInfo['gestionnaire'],
+                    (int) $userInfo['can_create_root_folder'],
+                    (int) $userInfo['can_manage_all_users'],
+                    (string) $userInfo['fonction_id'],
+                    (string) $userInfo['user_api_allowed_folders'],
+                    (int) $userInfo['allowed_to_create'],
+                    (int) $userInfo['allowed_to_read'],
+                    (int) $userInfo['allowed_to_update'],
+                    (int) $userInfo['allowed_to_delete'],
                 );
             } else {
                 return ["error" => "Login failed.", "info" => "password : Not valid"];
@@ -222,7 +192,9 @@ class AuthModel extends Database
         int $allowed_to_delete,
     ): array
     {
-        include API_ROOT_PATH . '/../includes/config/tp.config.php';
+        // Load config
+        $configManager = new ConfigManager();
+        $SETTINGS = $configManager->getAllSettings();
         
 		$payload = [
             'username' => $login,
@@ -273,11 +245,16 @@ class AuthModel extends Database
         $restrictedItems = [];
         $personalFolders = [];
 
-        $userFunctionId = str_replace(";", ",", $userInfo['fonction_id']);
+        $userFunctionId = explode(";", $userInfo['fonction_id']);
 
         // Get folders from the roles
-        if (empty($userFunctionId) === false) {
-            $rows = $this->select("SELECT * FROM " . prefixTable('roles_values') . " WHERE role_id IN (".$userFunctionId.") AND type IN ('W', 'ND', 'NE', 'NDNE', 'R')");
+        if (count($userFunctionId) > 0) {
+            $rows = DB::query(
+                'SELECT * 
+                FROM ' . prefixTable('roles_values') . '
+                WHERE role_id IN %li  AND type IN ("W", "ND", "NE", "NDNE", "R")',
+                $userFunctionId
+            );
             foreach ($rows as $record) {
                 if ($record['type'] === 'R') {
                     array_push($readOnlyFolders, $record['folder_id']);
@@ -298,8 +275,14 @@ class AuthModel extends Database
         
         // Does this user is allowed to see other items
         $inc = 0;
-        $rows = $this->select("SELECT id, id_tree FROM " . prefixTable('items') . " WHERE restricted_to LIKE '".$userInfo['id']."'".
-            (empty($userFunctionId) === false ? ' AND id_tree NOT IN ('.$userFunctionId.')' : ''));
+        $rows = DB::query(
+            'SELECT id, id_tree 
+            FROM ' . prefixTable('items') . '
+            WHERE restricted_to LIKE %s'.
+            (count($userFunctionId) > 0 ? ' AND id_tree NOT IN %li' : ''),
+            $userInfo['id'],
+            count($userFunctionId) > 0 ? $userFunctionId : DB::sqleval('0')
+        );
         foreach ($rows as $record) {
             // Exclude restriction on item if folder is fully accessible
             $restrictedFoldersForItems[$inc] = $record['id_tree'];
@@ -307,11 +290,14 @@ class AuthModel extends Database
         }
 
         // Check for the users roles if some specific rights exist on items
-        $rows = $this->select("SELECT i.id_tree, r.item_id
-            FROM " . prefixTable('items') . " as i
-            INNER JOIN " . prefixTable('restriction_to_roles') . " as r ON (r.item_id=i.id)
-            WHERE ".(empty($userFunctionId) === false ? ' id_tree NOT IN ('.$userFunctionId.') AND ' : '')." i.id_tree != ''
-            ORDER BY i.id_tree ASC");
+        $rows = DB::query(
+            'SELECT i.id_tree, r.item_id
+            FROM ' . prefixTable('items') . ' AS i
+            INNER JOIN ' . prefixTable('restriction_to_roles') . ' AS r ON (r.item_id=i.id)
+            WHERE '.(count($userFunctionId) > 0 ? ' id_tree NOT IN %li AND ' : '').' i.id_tree != ""
+            ORDER BY i.id_tree ASC',
+            count($userFunctionId) > 0 ? $userFunctionId : DB::sqleval('0')
+        );
         foreach ($rows as $record) {
             $foldersLimited[$record['id_tree']][$inc] = $record['item_id'];
             //array_push($foldersLimitedFull, $record['item_id']);
@@ -321,12 +307,13 @@ class AuthModel extends Database
         }
 
         // Add all personal folders
-        $rows = $this->select(
-            'SELECT id
+        $rows = DB::queryFirstRow(
+            'SELECT id 
             FROM ' . prefixTable('nested_tree') . '
-            WHERE title = '.$userInfo['id'].' AND personal_folder = 1'.
-            (empty($userFunctionId) === false ? ' AND id NOT IN ('.$userFunctionId.')' : '').
-            ' LIMIT 0,1'
+            WHERE title = %i AND personal_folder = 1'.
+            (count($userFunctionId) > 0 ? ' AND id NOT IN %li' : ''),
+            $userInfo['id'],
+            count($userFunctionId) > 0 ? $userFunctionId : DB::sqleval('0')
         );
         if (empty($rows['id']) === false) {
             array_push($personalFolders, $rows['id']);

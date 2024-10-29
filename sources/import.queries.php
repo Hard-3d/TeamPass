@@ -36,7 +36,7 @@ use Goodby\CSV\Import\Standard\LexerConfig;
 use voku\helper\AntiXSS;
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
@@ -47,10 +47,10 @@ require_once 'main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -160,19 +160,20 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
         if ($fp = fopen($file, 'r')) {
             // data from CSV
             $valuesToImport = array();
-
+            $header = fgetcsv($fp);
             // Lexer configuration
             $config = new LexerConfig();
             $lexer = new Lexer($config);
             $config->setIgnoreHeaderLine('true');
             $interpreter = new Interpreter();
-            $interpreter->addObserver(function (array $row) use (&$valuesToImport) {
+            $interpreter->addObserver(function (array $row) use (&$valuesToImport,$header) {
+                $rowData = array_combine($header, $row);
                 $valuesToImport[] = array(
-                    'Label' => $row[0],
-                    'Login' => $row[1],
-                    'Password' => $row[2],
-                    'url' => $row[3],
-                    'Comments' => $row[4],
+                    'Label' => $rowData['label'],
+                    'Login' => $rowData['login'],
+                    'Password' => $rowData['pw'],
+                    'url' => $rowData['url'],
+                    'Comments' => $rowData['description'],
                 );
             });
             $lexer->parse($file, $interpreter);
@@ -305,13 +306,23 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
             $post_data,
             'decode'
         );
-        
+
         // Init post variable
         $post_folder = filter_var($dataReceived['folder-id'], FILTER_SANITIZE_NUMBER_INT);
-        $post_items = filter_var_array(
-            $dataReceived['items'],
-            FILTER_SANITIZE_FULL_SPECIAL_CHARS
-        );
+
+        // Clean each array entry and exclude password as it will be hashed
+        $post_items = [];
+        foreach ($dataReceived['items'] as $item) {
+            $filtered_item = [];
+            foreach ($item as $key => $value) {
+                if ($key !== 'pwd') {
+                    $value = filter_var($value, FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+                }
+                $filtered_item[$key] = $value;
+            }
+            $post_items[] = $filtered_item;
+        }
+
         $post_edit_role = filter_var($dataReceived['edit-role'], FILTER_SANITIZE_NUMBER_INT);
         $post_edit_all = filter_var($dataReceived['edit-all'], FILTER_SANITIZE_NUMBER_INT);
 
@@ -330,14 +341,11 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
             $personalFolder = 0;
         }
 
-        //Prepare variables
-        //$listItems = json_decode($post_items, true);
-
         // Clean each array entry
         if (is_array($post_items) === true) {
             array_walk_recursive($post_items, 'cleanOutput');
         }
-        //print_r($post_items);
+        
         // Loop on array
         foreach ($post_items as $item) {
             //For each item, insert into DB
@@ -369,6 +377,8 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
                     'login' => empty($item['login']) === true ? '' : substr($item['login'], 0, 200),
                     'anyone_can_modify' => $post_edit_all,
                     'encryption_type' => 'teampass_aes',
+                    'item_key' => uniqidReal(50),
+                    'created_at' => time(),
                 )
             );
             $newId = DB::insertId();
@@ -492,92 +502,151 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
         $new = simplexml_load_string($xmlfile);
         $con = json_encode($new);
         $newArr = json_decode($con, true);
-        
+
+
         /**
-         * Undocumented function
-         *
-         * @param array $array
-         * @param integer $previousFolder
-         * @param array $newItemsToAdd
-         * @param integer $level
-         * @return array
+         * Recursive function to process the Keepass XML structure.
+         * 
+         * @param array $array The current array to process.
+         * @param string $previousFolder The parent folder ID.
+         * @param array $newItemsToAdd The new items to add to the database.
+         * @param int $level The current level of the recursion.
+         * 
+         * @return array The new items to add to the database.
          */
         function recursive($array, $previousFolder, $newItemsToAdd, $level) : array
         {
-            // Manage entries
-            if (isset($array['Entry']) === true) {
-                foreach($array['Entry'] as $key => $value) {
-                    if (isset($value['String']) === true) {
-                        $itemDefinition = [];
-                        $c = count($value['String']);
-                        for ($i = 0; $i < $c; $i++) {
-                            $itemDefinition[$value['String'][$i]['Key']] = is_array($value['String'][$i]['Value']) === false ? $value['String'][$i]['Value'] : '';
-                        }
-                        $itemDefinition['parentFolderId'] = $previousFolder;
-                        isset($itemDefinition['Notes']) === false ? $itemDefinition['Notes'] = '' : '';
-                        isset($itemDefinition['URL']) === false ? $itemDefinition['URL'] = '' : '';
-                        isset($itemDefinition['Password']) === false ? $itemDefinition['Password'] = '' : '';
-                        array_push(
-                            $newItemsToAdd['items'],
-                            $itemDefinition
-                        );
-                        continue;
-                    }
-                    
-                    if ($key === "String") {
-                        array_push(
-                            $newItemsToAdd['items'],
-                            [
-                                'Notes' => is_array($value[0]['Value']) === false ? $value[0]['Value'] : '',
-                                'Title' => is_array($value[2]['Value']) === false ? $value[2]['Value'] : '',
-                                'Password' => is_array($value[1]['Value']) === false ? $value[1]['Value'] : '',
-                                'URL' => is_array($value[3]['Value']) === false ? $value[3]['Value'] : '',
-                                'UserName' => is_array($value[4]['Value']) === false ? $value[4]['Value'] : '',
-                                'parentFolderId' => $previousFolder,
-                            ]
-                        );
-                    }
-                }
+            // Handle entries (items)
+            if (isset($array['Entry'])) {
+                $newItemsToAdd = handleEntries($array['Entry'], $previousFolder, $newItemsToAdd);
             }
 
-            // Manage GROUPS
-            if (isset($array['Group']) === true && is_array($array['Group'])=== true) {
-                $currentFolderId = $previousFolder;
-                if (isset($array['Group']['UUID']) === true) {
-                    // build expect array format
-                    $array['Group'] = [$array['Group']];
-                }
-                foreach($array['Group'] as $key => $value){
-                    // Add this new folder
-                    array_push(
-                        $newItemsToAdd['folders'],
-                        [
-                            'folderName' => $value['Name'],
-                            'uuid' => $value['UUID'],
-                            'parentFolderId' => $previousFolder,
-                            'level' => $level,
-                        ]
-                    );
-                    $previousFolder = $value['UUID'];
-                    
-                    // recursive inside this entry
-                    $newItemsToAdd = recursive(
-                        array_merge(
-                            ['Entry' => isset($value['Entry']) === true ? $value['Entry'] : ''],
-                            ['Group' => isset($value['Group']) === true ? $value['Group'] : ''],
-                        ),
-                        $previousFolder,
-                        $newItemsToAdd,
-                        $level + 1
-                    );
-
-                    $previousFolder = $currentFolderId;
-                }
+            // Handle groups (folders)
+            if (isset($array['Group']) && is_array($array['Group'])) {
+                $newItemsToAdd = handleGroups($array['Group'], $previousFolder, $newItemsToAdd, $level);
             }
-            
+
             return $newItemsToAdd;
         }
-        
+
+        /**
+         * Handle entries (items) within the structure.
+         * It processes each entry and adds it to the new items list.
+         * 
+         * @param array $entries The entries to process.
+         * @param string $previousFolder The parent folder ID.
+         * @param array $newItemsToAdd The new items to add to the database.
+         * 
+         * @return array The new items to add to the database.
+         */
+        function handleEntries(array $entries, string $previousFolder, array $newItemsToAdd) : array
+        {
+            foreach ($entries as $key => $value) {
+                // Check if the entry has a 'String' field and process it
+                if (isset($value['String'])) {
+                    $newItemsToAdd['items'][] = buildItemDefinition($value['String'], $previousFolder);
+                } 
+                // If it's a direct 'String' item, build a simple item
+                elseif ($key === 'String') {
+                    $newItemsToAdd['items'][] = buildSimpleItem($value, $previousFolder);
+                }
+            }
+
+            return $newItemsToAdd;
+        }
+
+        /**
+         * Build an item definition from the 'String' fields.
+         * Converts the key-value pairs into a usable item format.
+         * 
+         * @param array $strings The 'String' fields to process.
+         * @param string $previousFolder The parent folder ID.
+         * 
+         * @return array The item definition.
+         */
+        function buildItemDefinition(array $strings, string $previousFolder) : array
+        {
+            $itemDefinition = [];
+            // Loop through each 'String' entry and map keys and values
+            foreach ($strings as $entry) {
+                $itemDefinition[$entry['Key']] = is_array($entry['Value']) ? '' : $entry['Value'];
+            }
+
+            // Set the parent folder and ensure default values for certain fields
+            $itemDefinition['parentFolderId'] = $previousFolder;
+            $itemDefinition['Notes'] = $itemDefinition['Notes'] ?? '';
+            $itemDefinition['URL'] = $itemDefinition['URL'] ?? '';
+            $itemDefinition['Password'] = $itemDefinition['Password'] ?? '';
+
+            return $itemDefinition;
+        }
+
+        /**
+         * Build a simple item with predefined fields.
+         * This is used when there is no associated key, just ordered values.
+         * 
+         * @param array $value The ordered values to process.
+         * @param string $previousFolder The parent folder ID.
+         * 
+         * @return array The simple item definition.
+         */
+        function buildSimpleItem(array $value, string $previousFolder) : array
+        {
+            return [
+                'Notes' => is_array($value[0]['Value']) ? '' : $value[0]['Value'],
+                'Title' => is_array($value[2]['Value']) ? '' : $value[2]['Value'],
+                'Password' => is_array($value[1]['Value']) ? '' : $value[1]['Value'],
+                'URL' => is_array($value[3]['Value']) ? '' : $value[3]['Value'],
+                'UserName' => is_array($value[4]['Value']) ? '' : $value[4]['Value'],
+                'parentFolderId' => $previousFolder,
+            ];
+        }
+
+        /**
+         * Handle groups (folders) within the structure.
+         * It processes each group and recursively goes deeper into subgroups and subentries.
+         * 
+         * @param array $groups The groups to process.
+         * @param string $previousFolder The parent folder ID.
+         * @param array $newItemsToAdd The new items to add to the database.
+         * 
+         * @return array The new items to add to the database.
+         */
+        function handleGroups($groups, string $previousFolder, array $newItemsToAdd, int $level) : array
+        {
+            // If a single group is found, wrap it into an array
+            if (isset($groups['UUID'])) {
+                $groups = [$groups];
+            }
+
+            // Save the current folder ID to restore it after recursion
+            $currentFolderId = $previousFolder;
+
+            foreach ($groups as $group) {
+                // Add the current group (folder) to the list
+                $newItemsToAdd['folders'][] = [
+                    'folderName' => $group['Name'],
+                    'uuid' => $group['UUID'],
+                    'parentFolderId' => $previousFolder,
+                    'level' => $level,
+                ];
+
+                // Recursively process entries and subgroups inside this group
+                $newItemsToAdd = recursive(
+                    [
+                        'Entry' => $group['Entry'] ?? '',
+                        'Group' => $group['Group'] ?? '',
+                    ],
+                    $group['UUID'],
+                    $newItemsToAdd,
+                    $level + 1
+                );
+            }
+
+            return $newItemsToAdd;
+        }
+
+        // Start the recursive processing
         $ret = recursive(
             array_merge(
                 ['Entry' => $newArr['Root']['Group']['Entry']],
@@ -701,13 +770,17 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
             $receivedParameters['folders'],
             FILTER_SANITIZE_FULL_SPECIAL_CHARS
         );
-        $item = filter_var_array(
+        $post_items = filter_var_array(
             $receivedParameters['items'],
             FILTER_SANITIZE_FULL_SPECIAL_CHARS
         );
         $ret = '';
 
-        //foreach($post_items as $item) {
+        // Start transaction for better performance
+        DB::startTransaction();
+
+        // Import all items
+        foreach($post_items as $item) {
             // get info about this folder
             $destinationFolderMore = DB::queryFirstRow(
                 'SELECT title FROM '.prefixTable('nested_tree').' WHERE id = %i',
@@ -745,6 +818,8 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
                     'inactif' => 0,
                     'restricted_to' => '',
                     'perso' => $post_folders[$item['parentFolderId']]['isPF'] === true ? 1 : 0,
+                    'item_key' => uniqidReal(50),
+                    'created_at' => time(),
                 )
             );
             $newId = DB::insertId();
@@ -805,8 +880,10 @@ switch (filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS)) {
 
             // prepare return
             $ret .= "<li>".substr(stripslashes($item['Title']), 0, 500)." [".$destinationFolderMore['title']."]</li>";
-        //}
+        }
 
+        // Commit transaction.
+        DB::commit();
 
         echo prepareExchangedData(
             array(

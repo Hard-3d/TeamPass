@@ -30,26 +30,26 @@ declare(strict_types=1);
  */
 
 
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\NestedTree\NestedTree;
 use voku\helper\AntiXSS;
+use TeampassClasses\SessionManager\SessionManager;
+use TeampassClasses\ConfigManager\ConfigManager;
 
 
 // Load functions
 require_once __DIR__.'/../../sources/main.functions.php';
 loadClasses('DB');
 
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 $antiXSS = new AntiXSS();
+$session = SessionManager::getSession();
 
-// Load config if $SETTINGS not defined
-try {
-    include_once __DIR__.'/../../includes/config/tp.config.php';
-} catch (Exception $e) {
-    throw new Exception("Error file '/includes/config/tp.config.php' not exists", 1);
-}
+// Load config
+$configManager = new ConfigManager();
+$SETTINGS = $configManager->getAllSettings();
 
 // Load tree
 $tree = new NestedTree(prefixTable('nested_tree'), 'id', 'parent_id', 'title');
@@ -127,7 +127,7 @@ if (empty($request->query->get('code')) === false
                     if ((int) $dataDelete['del_type'] === 1 && (int) $dataDelete['del_value'] >= 1) {
                         // decrease counter
                         DB::update(
-                            $pre.'automatic_del',
+                            prefixTable('automatic_del'),
                             [
                                 'del_value' => $dataDelete['del_value'] - 1,
                             ],
@@ -138,7 +138,7 @@ if (empty($request->query->get('code')) === false
                         || ((int) $dataDelete['del_type'] === 2 && (int) $dataDelete['del_value'] < time())
                     ) {
                         // delete item
-                        DB::delete($pre.'automatic_del', 'item_id = %i', $data['item_id']);
+                        DB::delete(prefixTable('automatic_del'), 'item_id = %i', $data['item_id']);
                         // make inactive object
                         DB::update(
                             prefixTable('items'),

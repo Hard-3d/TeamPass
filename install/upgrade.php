@@ -88,7 +88,7 @@ if (version_compare(PHP_VERSION, MIN_PHP_VERSION, '>=')) {
     $phpVersionisOkay = false;
 }
 
-if (defined(SECUREPATH) === false) {
+if (!defined('SECUREPATH')) {
     define("SECUREPATH", dirname(SECUREFILE));
 }
 
@@ -495,7 +495,6 @@ if (!isset($_GET['step']) && !isset($post_step)) {
             <ul>
             <li>Regenerate settings.php file <span id="step5_settingFile"></span></li>
             <li>Anonymize saltkey file <span id="step5_saltkeyFile"></span></li>
-            <li>Generate config file <span id="step5_configFile"></span></li>
             <li>Generate CSRFP config file <span id="step5_csrfpFile"></span></li>
             <li>Add new cron job <span id="step5_cronJob"></span></li>	
             </ul>
@@ -754,7 +753,7 @@ function aesEncrypt(text)
 function manageUpgradeScripts(file_number)
 {
     var start_at = 0;
-    var noitems_by_loop = 100;
+    var noitems_by_loop = 1000;
     var loop_number = 0;
 
     if (file_number == 0) {

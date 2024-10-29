@@ -30,9 +30,9 @@ namespace TeampassClasses\LdapExtra;
  */
 
 use LdapRecord\Models\ActiveDirectory\Group as BaseGroup ;
-use LdapRecord\Models\ActiveDirectory\User as AdUser;
 use LdapRecord\Connection;
 use LdapRecord\Container;
+use LdapRecord\Models\ActiveDirectory\User;
 
 class ActiveDirectoryExtra extends BaseGroup 
 {
@@ -62,7 +62,7 @@ class ActiveDirectoryExtra extends BaseGroup
 
             $groupsArr = [];
             foreach($groups as $key => $group) {
-                $adGroupId = (int) $group[(isset($settings['ldap_guid_attibute']) === true && empty($settings['ldap_guid_attibute']) === false ? $settings['ldap_guid_attibute'] : 'gidnumber')][0];
+                $adGroupId = md5($group[(isset($settings['ldap_guid_attibute']) === true && empty($settings['ldap_guid_attibute']) === false ? $settings['ldap_guid_attibute'] : 'gidnumber')][0]);
                 $groupsArr[$adGroupId] = [
                     'ad_group_id' => $adGroupId,
                     'ad_group_title' => $group['cn'][0],
@@ -94,12 +94,6 @@ class ActiveDirectoryExtra extends BaseGroup
 
         try {
             Container::addConnection($connection);
-
-            // Check if connection is ok
-            if (!$connection->isConnected()) {
-                $connection->connect();
-            }
-
             // get id attribute
             if (isset($SETTINGS['ldap_guid_attibute']) ===true && empty($SETTINGS['ldap_guid_attibute']) === false) {
                 $idAttribute = $SETTINGS['ldap_guid_attibute'];
@@ -108,16 +102,16 @@ class ActiveDirectoryExtra extends BaseGroup
             }
 
             // Get user groups from AD
-            $user = AdUser::find($userDN);
+            $user = User::find($userDN);
             $groups = $user->groups()->get();
             foreach ($groups as $group) {
                 array_push(
                     $groupsArr,
-                    $group[$idAttribute][0]
+                    md5($group[$idAttribute][0])
                 );
             }
         } catch (\LdapRecord\Auth\BindException $e) {
-            error_log("TEAMPASS ERROR - ".__FILE__." - userIsEnabled - ".$e->getMessage());
+            // Do nothing
         }
 
         return [
@@ -139,19 +133,10 @@ class ActiveDirectoryExtra extends BaseGroup
         $isEnabled = false;
         try {
             Container::addConnection($connection);
-
-            // Check if connection is ok
-            if (!$connection->isConnected()) {
-                $connection->connect();
-            }
-
-            $user = AdUser::find($userDN);
-            if (!$user) {
-                return false;
-            }
+            $user = User::find($userDN);
             $isEnabled = $user->isEnabled();
         } catch (\LdapRecord\Auth\BindException $e) {
-            error_log("TEAMPASS ERROR - ".__FILE__." - userIsEnabled - ".$e->getMessage());
+            // Do nothing
         }
         return $isEnabled;
     }

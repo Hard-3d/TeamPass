@@ -163,7 +163,7 @@ function jsonErrorHdl(message)
 function prepareExchangedData(data, type, key, fileName = '', functionName = '')
 {
     if (type === 'decode') {
-        if (parseInt($('#encryptClientServer').val()) === 0) {
+        if (parseInt($('#encryptClientServerStatus').val()) === 0) {
             try {
                 return $.parseJSON(data);
             }
@@ -182,8 +182,8 @@ function prepareExchangedData(data, type, key, fileName = '', functionName = '')
             }
         }
     } else if (type === 'encode') {
-        if (parseInt($('#encryptClientServer').val()) === 0) {
-            return stripHtml(data);
+        if (parseInt($('#encryptClientServerStatus').val()) === 0) {
+            return data;
         } else {
             let encryption = new Encryption();
             return encryption.encrypt(data, key);
@@ -201,22 +201,6 @@ function isJsonString(str) {
     }
     return true;
 }
-
-
-/**
- * Returns the text from a HTML string
- * 
- * @param {string} String The html string
- */
-function stripHtml(html) {
-    // Create a new div element
-    let temporalDivElement = document.createElement('div');
-    // Set the HTML content with the providen
-    temporalDivElement.innerHTML = html;
-    // Retrieve the text property of the element (cross-browser support)
-    return temporalDivElement.textContent || temporalDivElement.innerText || '';
-}
-
 
 /**
  * 
@@ -407,11 +391,14 @@ function simplePurifier(
     .replaceAll('&#62;', '>')
     .replaceAll('&amp;', '&')
     .replaceAll('&#38;', '&')
+    .replaceAll('&#038;', '&')
     .replaceAll('&#x26;', '&')
     .replaceAll('&quot;', '"')
     .replaceAll('&#34;;', '"')
+    .replaceAll('&#034;;', '"')
     .replaceAll('&#x22;', '"')
-    .replaceAll('&#39;', "'");
+    .replaceAll('&#39;', "'")
+    .replaceAll('&#039;', "'");
 
     if (bSanitize === false) {
         return textCleaned;

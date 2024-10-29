@@ -33,6 +33,7 @@ use Symfony\Component\HttpFoundation\Request;
 use TeampassClasses\SessionManager\SessionManager;
 use TeampassClasses\Language\Language;
 use TeampassClasses\PerformChecks\PerformChecks;
+use TeampassClasses\ConfigManager\ConfigManager;
 
 
 // Load functions
@@ -44,10 +45,9 @@ loadClasses('DB');
 $lang = new Language();
 
 // Load config if $SETTINGS not defined
-try {
-    include_once __DIR__.'/../includes/config/tp.config.php';
-} catch (Exception $e) {
-    throw new Exception("Error file '/includes/config/tp.config.php' not exists", 1);
+if (empty($SETTINGS)) {
+    $configManager = new ConfigManager();
+    $SETTINGS = $configManager->getAllSettings();
 }
 
 // Do checks
@@ -191,7 +191,10 @@ if (null === $post_user_token) {
     }
 
     // Load Settings
-    include_once $SETTINGS['cpassman_dir'] . '/includes/config/tp.config.php';
+    if (empty($SETTINGS)) {
+        $configManager = new ConfigManager();
+        $SETTINGS = $configManager->getAllSettings();
+    }
 }
 
 // HTTP headers for no cache etc
@@ -216,13 +219,13 @@ $POST_MAX_SIZE = ini_get('post_max_size');
 $unit = strtoupper(substr($POST_MAX_SIZE, -1));
 $multiplier = ($unit == 'M' ? 1048576 : ($unit == 'K' ? 1024 : ($unit == 'G' ? 1073741824 : 1)));
 if ((int) $_SERVER['CONTENT_LENGTH'] > $multiplier * (int) $POST_MAX_SIZE && $POST_MAX_SIZE) {
-    handleAttachmentError('POST exceeded maximum allowed size.', 111);
+    handleAttachmentError('POST exceeded maximum allowed size.', 111, 413);
 }
 
 // Validate the file size (Warning: the largest files supported by this code is 2GB)
 $file_size = @filesize($_FILES['file']['tmp_name']);
 if ($file_size === false || (int) $file_size > (int) $max_file_size_in_bytes) {
-    handleAttachmentError('File exceeds the maximum allowed size', 120);
+    handleAttachmentError('File exceeds the maximum allowed size', 120, 413);
 }
 if ($file_size <= 0) {
     handleAttachmentError('File size outside allowed lower bound', 112);
@@ -257,7 +260,7 @@ if (
         )
     ) === false
 ) {
-    handleAttachmentError('Invalid file extension.', 115);
+    handleAttachmentError('Invalid file extension.', 115, 415);
 }
 
 // 5 minutes execution time
@@ -467,12 +470,21 @@ if (null !== $post_type_upload && $post_type_upload === 'item_attachments') {
 die('{"jsonrpc" : "2.0", "result" : null, "id" : "' . $newID . '"}');
 
 /**
- * Undocumented function.
+ * Handle errors and kill script.
  *
  * @param string $message Message
+ * 
  * @param integer $code    Code
+ * 
  */
-function handleAttachmentError($message, $code)
+function handleAttachmentError($message, $code, $http_code = 400)
 {
+    // HTTP 40x code to avoid "success" in UI.
+    http_response_code($http_code);
+
+    // json error message
     echo '{"jsonrpc" : "2.0", "error" : {"code": ' . htmlentities((string) $code, ENT_QUOTES) . ', "message": "' . htmlentities((string) $message, ENT_QUOTES) . '"}, "id" : "id"}';
+    
+    // Force exit to avoid bypass filters.
+    exit;
 }

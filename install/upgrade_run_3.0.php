@@ -30,6 +30,7 @@ use EZimuel\PHPSecureSession;
 use TeampassClasses\SuperGlobal\SuperGlobal;
 use TeampassClasses\Language\Language;
 use TeampassClasses\PasswordManager\PasswordManager;
+use TeampassClasses\ConfigManager\ConfigManager;
 
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -42,13 +43,16 @@ error_reporting(E_ERROR | E_PARSE);
 set_time_limit(600);
 $_SESSION['CPM'] = 1;
 
+// Load config
+$configManager = new ConfigManager();
+$SETTINGS = $configManager->getAllSettings();
+
 //include librairies
 require_once '../includes/language/english.php';
 require_once '../includes/config/include.php';
 require_once '../includes/config/settings.php';
 require_once 'tp.functions.php';
 require_once 'libs/aesctr.php';
-require_once '../includes/config/tp.config.php';
 
 // Get the encrypted password
 define('DB_PASSWD_CLEAR', defuse_return_decrypted(DB_PASSWD));
@@ -62,24 +66,17 @@ $database = DB_NAME;
 $port = DB_PORT;
 $user = DB_USER;
 
-if (mysqli_connect(
+$db_link = mysqli_connect(
     $server,
     $user,
     $pass,
     $database,
     $port
-)) {
-    $db_link = mysqli_connect(
-        $server,
-        $user,
-        $pass,
-        $database,
-        $port
-    );
+);
+if ($db_link) {
+    $db_link->set_charset(DB_ENCODING);
 } else {
-    $res = 'Impossible to get connected to server. Error is: ' . addslashes(mysqli_connect_error());
     echo '[{"finish":"1", "msg":"", "error":"Impossible to get connected to server. Error is: ' . addslashes(mysqli_connect_error()) . '!"}]';
-    mysqli_close($db_link);
     exit();
 }
 
@@ -655,20 +652,6 @@ deleteAll([
 //---<END 3.0.10
 
 //---------------------------------------------------------------------
-
-// Save timestamp
-$tmp = mysqli_num_rows(mysqli_query($db_link, "SELECT * FROM `" . $pre . "misc` WHERE type = 'admin' AND intitule = 'upgrade_timestamp'"));
-if (intval($tmp) === 0) {
-    mysqli_query(
-        $db_link,
-        "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`) VALUES ('admin', 'upgrade_timestamp', ".time().")"
-    );
-} else {
-    mysqli_query(
-        $db_link,
-        "UPDATE `" . $pre . "misc` SET valeur = ".time()." WHERE type = 'admin' AND intitule = 'upgrade_timestamp'"
-    );
-}
 
 //---< END 3.0.X upgrade steps
 

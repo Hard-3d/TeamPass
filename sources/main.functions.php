@@ -52,6 +52,8 @@ use Symfony\Component\Process\Process;
 use Symfony\Component\Process\PhpExecutableFinder;
 use TeampassClasses\Encryption\Encryption;
 use TeampassClasses\ConfigManager\ConfigManager;
+use TeampassClasses\EmailService\EmailService;
+use TeampassClasses\EmailService\EmailSettings;
 
 header('Content-type: text/html; charset=utf-8');
 header('Cache-Control: no-cache, must-revalidate');
@@ -60,12 +62,8 @@ loadClasses('DB');
 $session = SessionManager::getSession();
 
 // Load config if $SETTINGS not defined
-$configManager = new ConfigManager();
+$configManager = new ConfigManager($session);
 $SETTINGS = $configManager->getAllSettings();
-/*if (isset($SETTINGS['cpassman_dir']) === false || empty($SETTINGS['cpassman_dir']) === true) {
-    include_once __DIR__ . '/../includes/config/tp.config.php';
-}
-*/
 
 /**
  * genHash().
@@ -77,6 +75,7 @@ $SETTINGS = $configManager->getAllSettings();
  *
  * @return string|void
  */
+/* TODO - Remove this function
 function bCrypt(
     string $password,
     string $cost
@@ -94,6 +93,7 @@ function bCrypt(
 
     return crypt($password, $salt);
 }
+*/
 
 /**
  * Checks if a string is hex encoded
@@ -420,7 +420,7 @@ function identAdmin($idFonctions, $SETTINGS, $tree)
  *
  * @return array
  */
-function convertToArray($element): array
+function convertToArray($element): ?array
 {
     if (is_string($element) === true) {
         if (empty($element) === true) {
@@ -1021,7 +1021,8 @@ function getStatisticsData(array $SETTINGS): array
     );
     $counter_items_perso = DB::count();
         DB::query(
-        'SELECT id FROM ' . prefixTable('users') . ''
+        'SELECT id FROM ' . prefixTable('users') . ' WHERE login NOT IN (%s, %s, %s)',
+        'OTV', 'TP', 'API'
     );
     $counter_users = DB::count();
         DB::query(
@@ -1102,7 +1103,7 @@ function getStatisticsData(array $SETTINGS): array
  * @param string $body          email message
  * @param string $email         email
  * @param string $receiverName  Receiver name
- * @param array  $SETTINGS      settings
+ * @param string $encryptedUserPassword      encryptedUserPassword
  *
  * @return void
  */
@@ -1110,7 +1111,8 @@ function prepareSendingEmail(
     $subject,
     $body,
     $email,
-    $receiverName = ''
+    $receiverName = '',
+    $encryptedUserPassword = ''
 ): void 
 {
     DB::insert(
@@ -1123,160 +1125,10 @@ function prepareSendingEmail(
                 'receivers' => $email,
                 'body' => $body,
                 'receiver_name' => $receiverName,
+                'encryptedUserPassword' => $encryptedUserPassword,
             ], JSON_HEX_QUOT | JSON_HEX_TAG),
         )
     );
-}
-
-/**
- * Permits to send an email.
- *
- * @param string $subject     email subject
- * @param string $textMail    email message
- * @param string $email       email
- * @param array  $SETTINGS    settings
- * @param string $textMailAlt email message alt
- * @param bool   $silent      no errors
- *
- * @return string some json info
- */
-function sendEmail(
-    $subject,
-    $textMail,
-    $email,
-    $SETTINGS,
-    $textMailAlt = null,
-    $silent = true,
-    $cron = false
-) {
-    $session = SessionManager::getSession();
-    $lang = new Language($session->get('user-language') ?? 'english');
-
-    // CAse where email not defined
-    if ($email === 'none' || empty($email) === true) {
-        return json_encode(
-            [
-                'error' => true,
-                'message' => $lang->get('forgot_my_pw_email_sent'),
-            ]
-        );
-    }
-
-    // Build and send email
-    $email = buildEmail(
-        $subject,
-        $textMail,
-        $email,
-        $SETTINGS,
-        $textMailAlt = null,
-        $silent = true,
-        $cron
-    );
-
-    if ($silent === false) {
-        return json_encode(
-            [
-                'error' => false,
-                'message' => $lang->get('forgot_my_pw_email_sent'),
-            ]
-        );
-    }
-    // Debug purpose
-    if ((int) $SETTINGS['email_debug_level'] !== 0 && $cron === false) {
-        return json_encode(
-            [
-                'error' => true,
-                'message' => isset($email['ErrorInfo']) === true ? $email['ErrorInfo'] : '',
-            ]
-        );
-    }
-    return json_encode(
-        [
-            'error' => false,
-            'message' => $lang->get('share_sent_ok'),
-        ]
-    );
-}
-
-
-function buildEmail(
-    $subject,
-    $textMail,
-    $email,
-    $SETTINGS,
-    $textMailAlt = null,
-    $silent = true,
-    $cron = false
-)
-{
-    // Load PHPMailer
-    $mail = new PHPMailer(true);
-    $languageDir = $SETTINGS['cpassman_dir'] . '/vendor/phpmailer/phpmailer/language/';
-
-    try {
-        // Set language and SMTPDebug
-        $mail->setLanguage('en', $languageDir);
-        $mail->SMTPDebug = ($cron || $silent) ? 0 : $SETTINGS['email_debug_level'];
-        
-        /*
-        // Define custom Debug output function
-        $mail->Debugoutput = function($str, $level) {
-            // Path to your log file
-            $logFilePath = '/var/log/phpmailer.log';
-            file_put_contents($logFilePath, gmdate('Y-m-d H:i:s'). "\t$level\t$str\n", FILE_APPEND | LOCK_EX);
-        };
-        */
-
-        // Configure SMTP
-        $mail->isSMTP();
-        $mail->Host = $SETTINGS['email_smtp_server'];
-        $mail->SMTPAuth = (int) $SETTINGS['email_smtp_auth'] === 1;
-        $mail->Username = $SETTINGS['email_auth_username'];
-        $mail->Password = $SETTINGS['email_auth_pwd'];
-        $mail->Port = (int) $SETTINGS['email_port'];
-        $mail->SMTPSecure = $SETTINGS['email_security'] !== 'none' ? $SETTINGS['email_security'] : '';
-        $mail->SMTPAutoTLS = $SETTINGS['email_security'] !== 'none';
-        $mail->CharSet = 'utf-8';   //#4143
-        $mail->SMTPOptions = [
-            'ssl' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-                'allow_self_signed' => true,
-            ],
-        ];
-
-        // Set From and FromName
-        $mail->From = $SETTINGS['email_from'];
-        $mail->FromName = $SETTINGS['email_from_name'];
-
-        // Prepare recipients
-        foreach (array_filter(explode(',', $email)) as $dest) {
-            $mail->addAddress($dest);
-        }
-        
-        // Prepare HTML and AltBody
-        $text_html = emailBody($textMail);
-        $mail->WordWrap = 80;
-        $mail->isHtml(true);
-        $mail->Subject = $subject;
-        $mail->Body = $text_html;
-        $mail->AltBody = is_null($textMailAlt) ? '' : $textMailAlt;
-        
-        // Send email
-        $mail->send();
-        $mail->smtpClose();
-        
-        return '';
-    } catch (Exception $e) {
-        error_log('Error sending email: ' . $e->getMessage());
-        if (!$silent || (int) $SETTINGS['email_debug_level'] !== 0) {
-            return json_encode([
-                'error' => true,
-                'errorInfo' => str_replace(["\n", "\t", "\r"], '', $mail->ErrorInfo),
-            ]);
-        }
-        return '';
-    }
 }
 
 /**
@@ -1409,24 +1261,36 @@ function prepareExchangedData($data, string $type, ?string $key = null)
     
     // Perform
     if ($type === 'encode' && is_array($data) === true) {
-        // Now encode
-        return Encryption::encrypt(
-            json_encode(
-                $data,
-                JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
-            ),
-            $session->get('key')
+        // json encoding
+        $data = json_encode(
+            $data,
+            JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP
         );
+
+        // Now encrypt
+        if ($session->get('encryptClientServer') === 1) {
+            $data = Encryption::encrypt(
+                $data,
+                $session->get('key')
+            );
+        }
+
+        return $data;
     }
     if ($type === 'decode' && is_array($data) === false) {
-        // check if key exists
-        return json_decode(
-            (string) Encryption::decrypt(
+        // Decrypt if needed
+        if ($session->get('encryptClientServer') === 1) {
+            $data = (string) Encryption::decrypt(
                 (string) $data,
                 $session->get('key')
-            ),
-            true
-        );
+            );
+        } else {
+            // Double html encoding received
+            $data = html_entity_decode(html_entity_decode($data));
+        }
+
+        // Return data array
+        return json_decode($data, true);
     }
     return '';
 }
@@ -1496,7 +1360,6 @@ function prefixTable(string $table): string
  * @param bool $uppercase Uppercase letters
  * @param bool $symbols Symbols
  * @param bool $lowercase Lowercase
- * @param array   $SETTINGS  SETTINGS
  * 
  * @return string
  */
@@ -1506,8 +1369,7 @@ function GenerateCryptKey(
     bool $numerals = false,
     bool $uppercase = false,
     bool $symbols = false,
-    bool $lowercase = false,
-    array $SETTINGS = []
+    bool $lowercase = false
 ): string {
     $generator = new ComputerPasswordGenerator();
     $generator->setRandomGenerator(new Php7RandomGenerator());
@@ -1527,6 +1389,66 @@ function GenerateCryptKey(
     }
 
     return $generator->generatePasswords()[0];
+}
+
+/**
+ * GenerateGenericPassword
+ *
+ * @param int     $size      Length
+ * @param bool $secure Secure
+ * @param bool $numerals Numerics
+ * @param bool $uppercase Uppercase letters
+ * @param bool $symbols Symbols
+ * @param bool $lowercase Lowercase
+ * @param array   $SETTINGS  SETTINGS
+ * 
+ * @return string
+ */
+function generateGenericPassword(
+    int $size,
+    bool $secure,
+    bool $lowercase,
+    bool $capitalize,
+    bool $numerals,
+    bool $symbols,
+    array $SETTINGS
+): string
+{
+    if ((int) $size > (int) $SETTINGS['pwd_maximum_length']) {
+        return prepareExchangedData(
+            array(
+                'error_msg' => 'Password length is too long! ',
+                'error' => 'true',
+            ),
+            'encode'
+        );
+    }
+    // Load libraries
+    $generator = new ComputerPasswordGenerator();
+    $generator->setRandomGenerator(new Php7RandomGenerator());
+
+    // Manage size
+    $generator->setLength(($size <= 0) ? 10 : $size);
+
+    if ($secure === true) {
+        $generator->setSymbols(true);
+        $generator->setLowercase(true);
+        $generator->setUppercase(true);
+        $generator->setNumbers(true);
+    } else {
+        $generator->setLowercase($lowercase);
+        $generator->setUppercase($capitalize);
+        $generator->setNumbers($numerals);
+        $generator->setSymbols($symbols);
+    }
+
+    return prepareExchangedData(
+        array(
+            'key' => $generator->generatePasswords(),
+            'error' => '',
+        ),
+        'encode'
+    );
 }
 
 /**
@@ -1650,7 +1572,7 @@ function logItems(
         ]
     );
     // Timestamp the last change
-    if ($action === 'at_creation' || $action === 'at_modifiation' || $action === 'at_delete' || $action === 'at_import') {
+    if (in_array($action, ['at_creation', 'at_modifiation', 'at_delete', 'at_import'], true)) {
         DB::update(
             prefixTable('misc'),
             [
@@ -1664,7 +1586,7 @@ function logItems(
     }
 
     // SYSLOG
-    if (isset($SETTINGS['syslog_enable']) === true && $SETTINGS['syslog_enable'] === '1') {
+    if (isset($SETTINGS['syslog_enable']) === true && (int) $SETTINGS['syslog_enable'] === 1) {
         // Extract reason
         $attribute = is_null($raison) === true ? Array('') : explode(' : ', $raison);
         // Get item info if not known
@@ -1817,70 +1739,50 @@ function noHTML(string $input, string $encoding = 'UTF-8'): string
 }
 
 /**
- * Permits to handle the Teampass config file
- * $action accepts "rebuild" and "update"
+ * Rebuilds the Teampass config file.
  *
- * @param string $action   Action to perform
- * @param array  $SETTINGS Teampass settings
- * @param string $field    Field to refresh
- * @param string $value    Value to set
+ * @param string $configFilePath Path to the config file.
+ * @param array  $settings       Teampass settings.
  *
  * @return string|bool
  */
-function handleConfigFile($action, $SETTINGS, $field = null, $value = null)
+function rebuildConfigFile(string $configFilePath, array $settings)
 {
-    $tp_config_file = $SETTINGS['cpassman_dir'] . '/includes/config/tp.config.php';
-
-    // Load class DB
-    loadClasses('DB');
-
-    if (file_exists($tp_config_file) === false || $action === 'rebuild') {
-        // perform a copy
-        if (file_exists($tp_config_file)) {
-            if (! copy($tp_config_file, $tp_config_file . '.' . date('Y_m_d_His', time()))) {
-                return "ERROR: Could not copy file '" . $tp_config_file . "'";
-            }
-        }
-
-        // regenerate
-        $data = [];
-        $data[0] = "<?php\n";
-        $data[1] = "global \$SETTINGS;\n";
-        $data[2] = "\$SETTINGS = array (\n";
-        $rows = DB::query(
-            'SELECT * FROM ' . prefixTable('misc') . ' WHERE type=%s',
-            'admin'
-        );
-        foreach ($rows as $record) {
-            array_push($data, "    '" . $record['intitule'] . "' => '" . htmlspecialchars_decode($record['valeur'], ENT_COMPAT) . "',\n");
-        }
-        array_push($data, ");\n");
-        $data = array_unique($data);
-    // ---
-    } elseif ($action === 'update' && empty($field) === false) {
-        $data = file($tp_config_file);
-        $inc = 0;
-        $bFound = false;
-        foreach ($data as $line) {
-            if (stristr($line, ');')) {
-                break;
-            }
-
-            if (stristr($line, "'" . $field . "' => '")) {
-                $data[$inc] = "    '" . $field . "' => '" . htmlspecialchars_decode($value ?? '', ENT_COMPAT) . "',\n";
-                $bFound = true;
-                break;
-            }
-            ++$inc;
-        }
-        if ($bFound === false) {
-            $data[$inc] = "    '" . $field . "' => '" . htmlspecialchars_decode($value ?? '', ENT_COMPAT). "',\n);\n";
+    // Perform a copy if the file exists
+    if (file_exists($configFilePath)) {
+        $backupFilePath = $configFilePath . '.' . date('Y_m_d_His', time());
+        if (!copy($configFilePath, $backupFilePath)) {
+            return "ERROR: Could not copy file '$configFilePath'";
         }
     }
 
-    // update file
-    file_put_contents($tp_config_file, implode('', $data ?? []));
+    // Regenerate the config file
+    $data = ["<?php\n", "global \$SETTINGS;\n", "\$SETTINGS = array (\n"];
+    $rows = DB::query('SELECT * FROM ' . prefixTable('misc') . ' WHERE type=%s', 'admin');
+    foreach ($rows as $record) {
+        $value = getEncryptedValue($record['valeur'], $record['is_encrypted']);
+        $data[] = "    '{$record['intitule']}' => '". htmlspecialchars_decode($value, ENT_COMPAT) . "',\n";
+    }
+    $data[] = ");\n";
+    $data = array_unique($data);
+
+    // Update the file
+    file_put_contents($configFilePath, implode('', $data));
+
     return true;
+}
+
+/**
+ * Returns the encrypted value if needed.
+ *
+ * @param string $value       Value to encrypt.
+ * @param int   $isEncrypted Is the value encrypted?
+ *
+ * @return string
+ */
+function getEncryptedValue(string $value, int $isEncrypted): string
+{
+    return $isEncrypted ? cryption($value, '', 'encrypt')['string'] : $value;
 }
 
 /**
@@ -2871,7 +2773,11 @@ function ldapCheckUserPassword(string $login, string $password, array $SETTINGS)
         $connection->connect();
     } catch (\LdapRecord\Auth\BindException $e) {
         $error = $e->getDetailedError();
-        error_log('TEAMPASS Error - Auth - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+        if ($error) {
+            error_log('TEAMPASS Error - LDAP - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+        } else {
+            error_log('TEAMPASS Error - LDAP - Code: '.$e->getCode().' - Message: '.$e->getMessage());
+        }
         // deepcode ignore ServerLeak: No important data is sent
         echo 'An error occurred.';
         return false;
@@ -2886,7 +2792,11 @@ function ldapCheckUserPassword(string $login, string $password, array $SETTINGS)
         }
     } catch (\LdapRecord\Auth\BindException $e) {
         $error = $e->getDetailedError();
-        error_log('TEAMPASS Error - Auth - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+        if ($error) {
+            error_log('TEAMPASS Error - LDAP - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+        } else {
+            error_log('TEAMPASS Error - LDAP - Code: '.$e->getCode().' - Message: '.$e->getMessage());
+        }
         // deepcode ignore ServerLeak: No important data is sent
         echo 'An error occurred.';
         return false;
@@ -3699,6 +3609,32 @@ function handleUserKeys(
         );
     }
 
+    // Check if valid public/private keys
+    if ($recovery_public_key !== '' && $recovery_private_key !== '') {
+        try {
+            // Generate random string
+            $random_str = generateQuickPassword(12, false);
+            // Encrypt random string with user publick key
+            $encrypted = encryptUserObjectKey($random_str, $recovery_public_key);
+            // Decrypt $encrypted with private key
+            $decrypted = decryptUserObjectKey($encrypted, $recovery_private_key);
+            // Check if decryptUserObjectKey returns our random string
+            if ($decrypted !== $random_str) {
+                throw new Exception('Public/Private keypair invalid.');
+            }
+        } catch (Exception $e) {
+            // Show error message to user and log event
+            error_log('ERROR: User '.$userId.' - '.$e->getMessage());
+
+            return prepareExchangedData([
+                    'error' => true,
+                    'message' => $lang->get('pw_encryption_error'),
+                ],
+                'encode'
+            );
+        }
+    }
+
     // Generate new keys
     if ($user_self_change === true && empty($recovery_public_key) === false && empty($recovery_private_key) === false){
         $userKeys = [
@@ -4258,7 +4194,6 @@ function handleUserRecoveryKeysDownload(int $userId, array $SETTINGS):string
 
     if (DB::count() > 0) {
         $now = (int) time();
-
         // Prepare file content
         $export_value = file_get_contents(__DIR__."/../includes/core/teampass_ascii.txt")."\n".
             "Generation date: ".date($SETTINGS['date_format'] . ' ' . $SETTINGS['time_format'], $now)."\n\n".
@@ -4332,7 +4267,6 @@ function loadClasses(string $className = ''): void
             DB::$connect_options = DB_CONNECT_OPTIONS;
         }
     }
-
 }
 
 /**
@@ -4380,6 +4314,7 @@ function returnIfSet($value, $retFalse = '', $retTrue = null): mixed
  * @param string $post_subject
  * @param array $post_replace
  * @param boolean $immediate_email
+ * @param string $encryptedUserPassword
  * @return string
  */
 function sendMailToUser(
@@ -4387,9 +4322,13 @@ function sendMailToUser(
     string $post_body,
     string $post_subject,
     array $post_replace,
-    bool $immediate_email = false
+    bool $immediate_email = false,
+    $encryptedUserPassword = ''
 ): ?string {
     global $SETTINGS;
+    $emailSettings = new EmailSettings($SETTINGS);
+    $emailService = new EmailService();
+
     if (count($post_replace) > 0 && is_null($post_replace) === false) {
         $post_body = str_replace(
             array_keys($post_replace),
@@ -4399,11 +4338,12 @@ function sendMailToUser(
     }
 
     if ($immediate_email === true) {
-        $ret = sendEmail(
+        
+        $ret = $emailService->sendMail(
             $post_subject,
             $post_body,
             $post_receipt,
-            $SETTINGS,
+            $emailSettings,
             '',
             false
         );
@@ -4423,7 +4363,8 @@ function sendMailToUser(
             $post_subject,
             $post_body,
             $post_receipt,
-            ""
+            "",
+            $encryptedUserPassword,
         );
     }
 
@@ -4450,4 +4391,34 @@ function convertPasswordStrength($passwordStrength): int
     } else {
         return TP_PW_STRENGTH_5;
     }
+}
+
+/**
+ * Vérifie si les IDs d'un tableau existent bien dans la table.
+ *
+ * @param array $ids - Tableau d'IDs à vérifier
+ * @param string $tableName - Nom de la table dans laquelle vérifier les IDs
+ * @param string $fieldName - Nom du champ dans lequel vérifier les IDs
+ * @return array - IDs qui n'existent pas dans la table
+ */
+function checkIdsExist(array $ids, string $tableName, string $fieldName) : array
+{
+    // Assure-toi que le tableau d'IDs n'est pas vide
+    if (empty($ids)) {
+        return [];
+    }
+
+    // Nettoyage des IDs pour éviter les injections SQL
+    $ids = array_map('intval', $ids);  // Assure que chaque ID est un entier
+
+    // Construction de la requête SQL pour vérifier les IDs dans la table
+    $result = DB::query('SELECT id FROM ' . prefixTable($tableName) . ' WHERE ' . $fieldName . ' IN %li', $ids);
+
+    // Extraire les IDs existants de la table
+    $existingIds = array_column($result, 'id');
+
+    // Trouver les IDs manquants en comparant les deux tableaux
+    $missingIds = array_diff($ids, $existingIds);
+
+    return $missingIds; // Renvoie les IDs qui n'existent pas dans la table
 }

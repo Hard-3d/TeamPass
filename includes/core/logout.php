@@ -30,9 +30,10 @@ declare(strict_types=1);
  */
 
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\NestedTree\NestedTree;
+use TeampassClasses\ConfigManager\ConfigManager;
 
 // Load functions
 require_once __DIR__.'/../../sources/main.functions.php';
@@ -40,16 +41,13 @@ require_once __DIR__.'/../../sources/main.functions.php';
 // init
 loadClasses('DB');
 
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 $session = SessionManager::getSession();
 
-// Load config if $SETTINGS not defined
-try {
-    include_once __DIR__.'/../../includes/config/tp.config.php';
-} catch (Exception $e) {
-    throw new Exception("Error file '/includes/config/tp.config.php' not exists", 1);
-}
+// Load config
+$configManager = new ConfigManager();
+$SETTINGS = $configManager->getAllSettings();
 
 $tree = new NestedTree(prefixTable('nested_tree'), 'id', 'parent_id', 'title');
 $get = [];
@@ -90,20 +88,22 @@ if (empty($user_id) === false) {
 $session->invalidate();
 $session->set('key', SessionManager::getCookieValue('PHPSESSID'));
 
-echo '
-    <script type="text/javascript" src="../../plugins/store.js/dist/store.everything.min.js"></script>
-    <script language="javascript" type="text/javascript">
-    <!--
-        // Clear localstorage
-        store.remove("teampassApplication");
-        store.remove("teampassSettings");
-        store.remove("teampassUser");
-        store.remove("teampassItem");
-        sessionStorage.clear();
-        localStorage.clear();
-        
-        setTimeout(function() {
-            document.location.href="../../index.php"
-        }, 1);
-    -->
-    </script>';
+?>
+<script type="text/javascript" src="../../plugins/store.js/dist/store.everything.min.js"></script>
+<script language="javascript" type="text/javascript">
+    // Save jstree state
+    jstree_save = store.get("jstree") !== undefined ? store.get("jstree") : null;
+
+    // Clear all localstorage
+    sessionStorage.clear();
+    localStorage.clear();
+
+    // Restore jstree state
+    if (jstree_save !== null) {
+        store.set('jstree', jstree_save);
+    }
+    
+    setTimeout(function() {
+        document.location.href="../../index.php?page=items&loginForm"
+    }, 1);
+</script>

@@ -33,7 +33,7 @@ declare(strict_types=1);
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 
 // Load functions
@@ -42,14 +42,14 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 if ($session->get('key') === null) {
     die('Hacking attempt...');
 }
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -166,11 +166,11 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                 // Decode returned data
                 var myData = prepareExchangedData(object.response, 'decode', '<?php echo $session->get('key'); ?>');
                 // update form
+                toastr.remove();
                 if (myData.error === false) {
                     $('#profile-user-avatar').attr('src', 'includes/avatars/' + myData.filename);
                     $('#profile-avatar-file-list').html('').addClass('hidden');
                 } else {
-                    toastr.remove();
                     toastr.error(
                         'An error occurred.<br />Returned data:<br />' + myData.message,
                         '', {
@@ -233,6 +233,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
             'language': $('#profile-user-language').val().toLowerCase(),
             'treeloadstrategy': $('#profile-user-treeloadstrategy').val().toLowerCase(),
             'agsescardid': $('#profile-user-agsescardid').length > 0 ? $('#profile-user-agsescardid').val() : '',
+            'split_view_mode': $('#profile-user-split_view_mode').val(),
         }
         console.log(data);
         //return false;
@@ -278,6 +279,22 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                     $('#profile-user-name').val(data.name)
                     $('#profile-user-lastname').val(data.lastname)
                     $('#profile-user-email').val(data.email)
+
+                    // Force session update
+                    store.update(
+                        'teampassUser',
+                        function(teampassUser) {
+                            teampassUser.user_name = data.name;
+                            teampassUser.user_lastname = data.lastname;
+                            teampassUser.user_email = data.email;
+                            teampassUser.user_language = data.language;
+                            teampassUser.user_timezone = data.timezone;
+                            teampassUser.user_treeloadstrategy = data.treeloadstrategy;
+                            teampassUser.user_agsescardid = data.agsescardid;
+                            teampassUser.split_view_mode = data.split_view_mode;
+                        }
+                    );
+                    console.log(store.get('teampassUser'));
 
                     // reload page in case of language change
                     if ($('#profile-user-language').val().toLowerCase() !== '<?php echo $session->get('user-language');?>') {
@@ -493,7 +510,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                         }
                     );
 
-                    window.location.href = "index.php";
+                    window.location.href = "./index.php";
                 }
 
             }
@@ -590,15 +607,11 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
             toastr.remove();
             toastr.info('<?php echo $lang->get('in_progress'); ?><i class="fa-solid fa-circle-notch fa-spin fa-2x ml-3"></i>');
 
-            var data = {
-                'user_id': store.get('teampassUser').user_id,
-            };
             // Do query
             $.post(
                 "sources/main.queries.php", {
                     'type': "user_recovery_keys_download",
                     'type_category': 'action_key',
-                    'data': prepareExchangedData(JSON.stringify(data), "encode", "<?php echo $session->get('key'); ?>"),
                     'key': '<?php echo $session->get('key'); ?>'
                 },
                 function(data) {
@@ -648,7 +661,26 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                     teampassUser.shown_warning_unsuccessful_login = true;
                 }
             );
-        });
-        
+        });        
     });
+
+    // Handle the copy in clipboard button for api key
+    document.getElementById('copy-api-key').addEventListener('click', function() {
+        const apiKey = document.getElementById('profile-user-api-token').textContent;
+        navigator.clipboard.writeText(apiKey).then(function() {
+            // Display message.
+            toastr.remove();
+            toastr.info(
+                '<?php echo $lang->get('copy_to_clipboard'); ?>',
+                '', {
+                    timeOut: 2000,
+                    progressBar: true,
+                    positionClass: 'toast-top-right'
+                }
+            );
+        }, function(err) {
+            // nothing
+        });
+    });
+
 </script>

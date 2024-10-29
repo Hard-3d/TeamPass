@@ -32,7 +32,7 @@ declare(strict_types=1);
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 
 // Load functions
@@ -41,14 +41,14 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 if ($session->get('key') === null) {
     die('Hacking attempt...');
 }
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -733,6 +733,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                 $('input[type=radio].only-admin').iCheck('enable');
                 $('#privilege-admin').iCheck('disable');
                 $('#privilege-hr').iCheck('disable');
+                $('#privilege-manager').iCheck('disable');
             } else {
                 $('#privilege-admin').iCheck('disable');
                 $('#privilege-hr').iCheck('disable');
@@ -819,10 +820,10 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
 
                     if (data.error === false) {
                         // Prefil with user data
-                        $('#form-login').val(data.login);
-                        $('#form-email').val(data.email);
-                        $('#form-name').val(data.name);
-                        $('#form-lastname').val(data.lastname);
+                        $('#form-login').val($('<div>').html(data.login).text());
+                        $('#form-email').val($('<div>').html(data.email).text());
+                        $('#form-name').val($('<div>').html(data.name).text());
+                        $('#form-lastname').val($('<div>').html(data.lastname).text());
                         $('#form-create-root-folder').iCheck(data.can_create_root_folder === 1 ? 'check' : 'uncheck');
                         $('#form-create-personal-folder').iCheck(data.personal_folder === 1 ? 'check' : 'uncheck');
                         $('#form-create-mfa-enabled').iCheck(data.mfa_enabled === 1 ? 'check' : 'uncheck');
@@ -1599,6 +1600,9 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                                 timeOut: 1000
                             }
                         );
+                          
+                        // Rrefresh list of users in Teampass
+                        oTable.ajax.reload();
                     }
                 }
             );
@@ -2175,7 +2179,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
         toastr.warning(
             '&nbsp;<button type="button" class="btn clear btn-toastr" style="width:100%;" onclick="addRoleToUser()"><?php echo $lang->get('please_confirm'); ?></button>',
             '<?php echo $lang->get('info'); ?>', {
-                positionClass: 'toast-top-center',
+                positionClass: 'toast-bottom-right',
                 closeButton: true
             }
         );
@@ -2435,7 +2439,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
 
         // prepare data
         var data = {
-            'id': $('.selected-user').data('user-id'),
+            'user_id': $('.selected-user').data('user-id'),
             'auth_type': auth
         };
         if (debugJavascript === true) console.log(data)
@@ -2513,7 +2517,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
             toastr.warning(
                 '&nbsp;<button type="button" class="btn clear btn-toastr" style="width:100%;" onclick="changeUserAuthType(\'ldap\')"><?php echo $lang->get('please_confirm'); ?></button>',
                 '<?php echo $lang->get('change_authentification_type_to_ldap'); ?>', {
-                    positionClass: 'toast-top-center',
+                    positionClass: 'toast-bottom-right',
                     closeButton: true
                 }
             );
@@ -2524,7 +2528,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
             toastr.warning(
                 '&nbsp;<button type="button" class="btn clear btn-toastr" style="width:100%;" onclick="changeUserAuthType(\'local\')"><?php echo $lang->get('please_confirm'); ?></button>',
                 '<?php echo $lang->get('change_authentification_type_to_local'); ?>', {
-                    positionClass: 'toast-top-center',
+                    positionClass: 'toast-bottom-right',
                     closeButton: true
                 }
             );

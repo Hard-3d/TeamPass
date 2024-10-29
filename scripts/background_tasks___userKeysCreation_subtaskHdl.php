@@ -26,7 +26,7 @@
  * @see       https://www.teampass.net
  */
 
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\ConfigManager\ConfigManager;
 
@@ -35,9 +35,9 @@ require_once __DIR__.'/../sources/main.functions.php';
 
 // init
 loadClasses('DB');
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -61,7 +61,7 @@ $arguments = $_SERVER['argv'];
 array_shift($arguments);
 
 
-$data = [
+$inputData = [
     'subTaskId' => $_SERVER['argv'][1],
     'index' => $_SERVER['argv'][2],
     'nb' => $_SERVER['argv'][3],
@@ -78,12 +78,6 @@ $filters = [
     'taskArguments' => 'trim|strip_tags',
     'taskId' => 'trim|escape',
 ];
-
-$inputData = dataSanitizer(
-    $data,
-    $filters
-);
-
 
 $taskArgs = json_decode($inputData['taskArguments'], true);
 /*
@@ -305,7 +299,10 @@ function cronContinueReEncryptingUserSharekeysStep20(
     // get user private key
     $ownerInfo = getOwnerInfo($extra_arguments['owner_id'], $extra_arguments['creator_pwd'], $SETTINGS);
     $userInfo = getOwnerInfo($extra_arguments['new_user_id'], $extra_arguments['new_user_pwd'], $SETTINGS);
-    
+
+    // Start transaction for better performance
+    DB::startTransaction();
+
     // Loop on items
     $rows = DB::query(
         'SELECT id, pw, perso
@@ -381,6 +378,9 @@ function cronContinueReEncryptingUserSharekeysStep20(
         'SELECT *
         FROM ' . prefixTable('items')
     );
+
+    // Commit transaction
+    DB::commit();
 
     $next_start = (int) $post_start + (int) $post_length;
     return [
@@ -867,6 +867,7 @@ function cronContinueReEncryptingUserSharekeysStep10(
     if (isset($extra_arguments['send_email']) === true && (int) $extra_arguments['send_email'] === 1) {
         sendMailToUser(
             filter_var($userInfo['email'], FILTER_SANITIZE_FULL_SPECIAL_CHARS),
+            // @scrutinizer ignore-type
             empty($extra_arguments['email_body']) === false ? $extra_arguments['email_body'] : $lang->get('email_body_user_config_1'),
             'TEAMPASS - ' . $lang->get('login_credentials'),
             (array) filter_var_array(
@@ -874,10 +875,11 @@ function cronContinueReEncryptingUserSharekeysStep10(
                     '#code#' => cryption($extra_arguments['new_user_code'], '','decrypt', $SETTINGS)['string'],
                     '#lastname#' => isset($userInfo['name']) === true ? $userInfo['name'] : '',
                     '#login#' => isset($userInfo['login']) === true ? $userInfo['login'] : '',
-                    '#password#' => cryption($extra_arguments['new_user_pwd'], '','decrypt', $SETTINGS)['string'],
                 ],
                 FILTER_SANITIZE_FULL_SPECIAL_CHARS
-            )
+            ),
+            false,
+            $extra_arguments['new_user_pwd']
         );
     }
         

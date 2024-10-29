@@ -97,6 +97,8 @@ function checkPage()
         }
     } else if (step === "4") {
     // STEP 4
+
+        // Password checks
         if ($("#admin_pwd").val() === "") {
             alertify
                 .error('<i class="fas fa-ban mr-2"></i>You must define a password for Administrator account.', 10)
@@ -112,13 +114,26 @@ function checkPage()
                 .error('<i class="fas fa-ban mr-2"></i>Administrator passwords are not similar.', 10)
                 .dismissOthers();
             return false;
-        } else{
-            $("#hid_db_pre").val($("#tbl_prefix").val());
-            jsonValues = {"tbl_prefix":sanitizeString($("#tbl_prefix").val()), "sk_path":sanitizeString($("#sk_path").val()), "admin_pwd":sanitizeString($("#admin_pwd").val()), "send_stats":""};
-            dataToUse = JSON.stringify(jsonValues);
-            tasks = ["misc*preparation"];
-            multiple = "";
         }
+        
+        // Email checks
+        if ($("#admin_email").val() === "") {
+            alertify
+                .error('<i class="fas fa-ban mr-2"></i>You must define an email for Administrator account.', 10)
+                .dismissOthers();
+            return false;
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($("#admin_email").val())) {
+            alertify
+                .error('<i class="fas fa-ban mr-2"></i>Administrator email is not valid.', 10)
+                .dismissOthers();
+            return false;
+        }
+
+        $("#hid_db_pre").val($("#tbl_prefix").val());
+        jsonValues = {"tbl_prefix":sanitizeString($("#tbl_prefix").val()), "sk_path":sanitizeString($("#sk_path").val()), "admin_pwd":sanitizeString($("#admin_pwd").val()), "admin_email":sanitizeString($("#admin_email").val()), "send_stats":""};
+        dataToUse = JSON.stringify(jsonValues);
+        tasks = ["misc*preparation"];
+        multiple = "";
     } else if (step === "5") {
     // STEP 5
         dataToUse = "";
@@ -174,19 +189,6 @@ function checkPage()
                         .prop("disabled", true)
                         .addClass("hidden");
                 }
-                
-                /*
-                * Removing automatic action
-                // Go to next step
-                if (step <= 6) {
-                    setTimeout(
-                        function(){
-                            $('#but_next').trigger('click');
-                        },
-                        1000
-                    );
-                }
-                */
             }
         });
     } else if (error === "" && multiple === "") {
@@ -213,7 +215,7 @@ function checkPage()
             complete : function(data){
                 data = $.parseJSON(data.responseText);
                 
-                if (data[0].error !== "" ) {
+                if (data[0].error !== "") {
                     alertify
                         .error('<i class="fas fa-ban mr-2"></i>Next ERROR occurred: <i>' + data[0].error + '</i><br />Please correct and relaunch.', 0)
                         .dismissOthers();
@@ -231,19 +233,6 @@ function checkPage()
                         .prop("disabled", false)
                         .removeClass("hidden");
                 }
-                
-                /*
-                * Removing automatic action
-                // Go to next step
-                if (step <= 6) {
-                    setTimeout(
-                        function(){
-                            $('#but_next').trigger('click');
-                        },
-                        1000
-                    );
-                }
-                */
             }
         });
     } else {
@@ -267,7 +256,7 @@ function doGetJson(task)
         async: false,
         data : {
             type:       "step_"+step,
-            data:  aesEncrypt(dataToUse), //
+            data:       aesEncrypt(dataToUse), //
             activity:   aesEncrypt(tsk[0]),
             task:       aesEncrypt(tsk[1]),
             db:         aesEncrypt(JSON.stringify(dbInfo)),
@@ -277,7 +266,7 @@ function doGetJson(task)
         }
     })
     .complete(function(data) {
-        console.log("\n\n--- RECEPTION---\n"+data+"\n-------\n")
+        console.log("\n\n--- RECEPTION---\n"+JSON.stringify(data, null, 2)+"\n-------\n")
         if (data.responseText === "") {
             alertify
                 .error('<i class="fas fa-ban mr-2">[ERROR] Answer from server is empty.', 10)
@@ -305,8 +294,11 @@ function doGetJson(task)
                 }
             } else {
                 $("#res"+step+"_check"+data[0].index).html('<span class="badge badge-danger"><i class="fas fa-ban text-warning mr-2"></i>' + data[0].error + "</i></span>");
-                                            
-                global_error_on_query = true;
+                
+                // Considere only a warning on GMP extension
+                if (data[0].index !== "16") {
+                    global_error_on_query = true;
+                }
             }
         }
         index++;

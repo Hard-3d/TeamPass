@@ -30,7 +30,7 @@ declare(strict_types=1);
  */
 
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use EZimuel\PHPSecureSession;
 use TeampassClasses\PerformChecks\PerformChecks;
@@ -43,10 +43,10 @@ require_once 'main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -123,8 +123,19 @@ if (null !== $post_type) {
                 $post_data,
                 'decode'
             );
+
+            // Check if the data is correct
+            // Required keys: id, label, user_id, action, login
+            $requiredKeys = ['id', 'label', 'user_id', 'action', 'login'];
             
-            if (is_array($dataReceived) === true && count($dataReceived) > 0 && array_key_exists('id', $dataReceived) === true && null !== filter_var($dataReceived['id'], FILTER_SANITIZE_NUMBER_INT)) {
+            if (
+                is_array($dataReceived) && // check if the data is an array
+                array_diff_key(array_flip($requiredKeys), $dataReceived) === [] &&  // check if all required keys have a valuekeys are present
+                count(array_filter($dataReceived)) === count($requiredKeys) && // check if all required 
+                in_array($dataReceived['action'], ['at_password_shown', 'at_password_copied'], true) && // only log these actions
+                $session->get('user-id') === (int) filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT) // only log actions of the current user
+            ) {
+                // Log the action
                 logItems(
                     $SETTINGS,
                     (int) filter_var($dataReceived['id'], FILTER_SANITIZE_NUMBER_INT),

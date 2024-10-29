@@ -30,7 +30,7 @@ declare(strict_types=1);
  */
 
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\NestedTree\NestedTree;
 use TeampassClasses\PerformChecks\PerformChecks;
@@ -42,10 +42,10 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -127,7 +127,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('admin_misc_cpassman_dir'); ?>
                                 </label>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='cpassman_dir' value='<?php echo isset($SETTINGS['cpassman_dir']) === true ? $SETTINGS['cpassman_dir'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='cpassman_dir' value='<?php echo isset($SETTINGS['cpassman_dir']) === true ? htmlspecialchars($SETTINGS['cpassman_dir']) : ''; ?>'>
                                 </div>
                             </div>
 
@@ -136,7 +136,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('admin_misc_cpassman_url'); ?>
                                 </label>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='cpassman_url' value='<?php echo isset($SETTINGS['cpassman_url']) === true ? $SETTINGS['cpassman_url'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='cpassman_url' value='<?php echo isset($SETTINGS['cpassman_url']) === true ? htmlspecialchars($SETTINGS['cpassman_url']) : ''; ?>'>
                                 </div>
                             </div>
 
@@ -145,7 +145,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('admin_path_to_upload_folder'); ?>
                                 </label>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='path_to_upload_folder' value='<?php echo isset($SETTINGS['path_to_upload_folder']) === true ? $SETTINGS['path_to_upload_folder'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='path_to_upload_folder' value='<?php echo isset($SETTINGS['path_to_upload_folder']) === true ? htmlspecialchars($SETTINGS['path_to_upload_folder']) : ''; ?>'>
                                     <small id='passwordHelpBlock' class='form-text text-muted'>
                                         <?php echo $lang->get('admin_path_to_upload_folder_tip'); ?>
                                     </small>
@@ -157,7 +157,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('admin_path_to_files_folder'); ?>
                                 </label>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='path_to_files_folder' value='<?php echo isset($SETTINGS['path_to_files_folder']) === true ? $SETTINGS['path_to_files_folder'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='path_to_files_folder' value='<?php echo isset($SETTINGS['path_to_files_folder']) === true ? htmlspecialchars($SETTINGS['path_to_files_folder']) : ''; ?>'>
                                     <small id='passwordHelpBlock' class='form-text text-muted'>
                                         <?php echo $lang->get('admin_path_to_files_folder_tip'); ?>
                                     </small>
@@ -169,7 +169,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('admin_misc_favicon'); ?>
                                 </label>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='favicon' value='<?php echo isset($SETTINGS['favicon']) === true ? $SETTINGS['favicon'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='favicon' value='<?php echo isset($SETTINGS['favicon']) === true ? htmlspecialchars($SETTINGS['favicon']) : ''; ?>'>
                                 </div>
                             </div>
 
@@ -178,7 +178,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('admin_misc_custom_logo'); ?>
                                 </label>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='custom_logo' value='<?php echo isset($SETTINGS['custom_logo']) === true ? $SETTINGS['custom_logo'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='custom_logo' value='<?php echo isset($SETTINGS['custom_logo']) === true ? htmlspecialchars($SETTINGS['custom_logo']) : ''; ?>'>
                                 </div>
                             </div>
 
@@ -187,7 +187,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('admin_misc_custom_login_text'); ?>
                                 </label>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='custom_login_text' value='<?php echo isset($SETTINGS['custom_login_text']) === true ? $SETTINGS['custom_login_text'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='custom_login_text' value='<?php echo isset($SETTINGS['custom_login_text']) === true ? htmlspecialchars($SETTINGS['custom_login_text']) : ''; ?>'>
                                 </div>
                             </div>
                         </div>
@@ -217,7 +217,7 @@ $zones = timezone_list();
                                 <?php echo $lang->get('settings_default_session_expiration_time'); ?>
                             </div>
                             <div class='col-2 mb-2'>
-                                <input type='number' class='form-control form-control-sm' id='default_session_expiration_time' value='<?php echo $SETTINGS['default_session_expiration_time'] ?? '60'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='default_session_expiration_time' value='<?php echo htmlspecialchars($SETTINGS['default_session_expiration_time']) ?? '60'; ?>'>
                             </div>
                         </div>
 
@@ -229,7 +229,19 @@ $zones = timezone_list();
                                 </small>
                             </div>
                             <div class='col-2 mb-2'>
-                                <input type='number' class='form-control form-control-sm' id='maximum_session_expiration_time' value='<?php echo $SETTINGS['maximum_session_expiration_time'] ?? '60'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='maximum_session_expiration_time' value='<?php echo htmlspecialchars($SETTINGS['maximum_session_expiration_time']) ?? '60'; ?>'>
+                            </div>
+                        </div>
+
+                        <div class='row mb-2 option' data-keywords="server setting encryption client">
+                            <div class='col-10'>
+                                <?php echo $lang->get('encryptClientServer'); ?>
+                                <small id='passwordHelpBlock' class='form-text text-muted'>
+                                    <?php echo $lang->get('encryptClientServer_tip'); ?>
+                                </small>
+                            </div>
+                            <div class='col-2'>
+                                <div class='toggle toggle-modern' id='encryptClientServer' data-toggle-on='<?php echo isset($SETTINGS['encryptClientServer']) && (int) $SETTINGS['encryptClientServer'] === 1 ? 'true' : 'false'; ?>'></div><input type='hidden' id='encryptClientServer_input' value='<?php echo isset($SETTINGS['encryptClientServer']) && (int) $SETTINGS['encryptClientServer'] === 1 ? '1' : '0'; ?>' />
                             </div>
                         </div>
 
@@ -262,7 +274,7 @@ $zones = timezone_list();
                                 </small>
                             </div>
                             <div class='col-2'>
-                                <input type='text' class='form-control form-control-sm' id='proxy_ip' value='<?php echo $SETTINGS['proxy_ip'] ?? '60'; ?>'>
+                                <input type='text' class='form-control form-control-sm' id='proxy_ip' value='<?php echo htmlspecialchars($SETTINGS['proxy_ip']) ?? '60'; ?>'>
                             </div>
                         </div>
 
@@ -274,7 +286,7 @@ $zones = timezone_list();
                                 </small>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='proxy_port' value='<?php echo $SETTINGS['proxy_port'] ?? '60'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='proxy_port' value='<?php echo htmlspecialchars($SETTINGS['proxy_port']) ?? '60'; ?>'>
                             </div>
                         </div>
 -->
@@ -286,7 +298,7 @@ $zones = timezone_list();
                                 </small>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='pwd_maximum_length' value='<?php echo $SETTINGS['pwd_maximum_length'] ?? '60'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='pwd_maximum_length' value='<?php echo htmlspecialchars($SETTINGS['pwd_maximum_length']) ?? '60'; ?>'>
                             </div>
                         </div>
 
@@ -295,7 +307,7 @@ $zones = timezone_list();
                                 <?php echo $lang->get('password_length_by_default'); ?>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='pwd_default_length' value='<?php echo $SETTINGS['pwd_default_length'] ?? '14'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='pwd_default_length' value='<?php echo htmlspecialchars($SETTINGS['pwd_default_length']) ?? '14'; ?>'>
                             </div>
                         </div>
 
@@ -374,7 +386,7 @@ $zones = timezone_list();
                             <?php echo $lang->get('number_of_used_pw'); ?>
                         </div>
                         <div class='col-2'>
-                            <input type='text' class='form-control form-control-sm' id='number_of_used_pw' value='<?php echo $SETTINGS['number_of_used_pw'] ?? '5'; ?>'>
+                            <input type='text' class='form-control form-control-sm' id='number_of_used_pw' value='<?php echo htmlspecialchars($SETTINGS['number_of_used_pw']) ?? '5'; ?>'>
                         </div>
                     </div>
                     -->
@@ -384,7 +396,7 @@ $zones = timezone_list();
                                 <?php echo $lang->get('pw_life_duration'); ?>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='pw_life_duration' value='<?php echo $SETTINGS['pw_life_duration'] ?? '5'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='pw_life_duration' value='<?php echo htmlspecialchars($SETTINGS['pw_life_duration']) ?? '5'; ?>'>
                             </div>
                         </div>
 
@@ -393,7 +405,7 @@ $zones = timezone_list();
                                 <?php echo $lang->get('nb_false_login_attempts'); ?>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='nb_bad_authentication' value='<?php echo $SETTINGS['nb_bad_authentication'] ?? '0'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='nb_bad_authentication' value='<?php echo htmlspecialchars($SETTINGS['nb_bad_authentication']) ?? '0'; ?>'>
                             </div>
                         </div>
 
@@ -444,7 +456,7 @@ $zones = timezone_list();
                           <?php echo $lang->get('personal_saltkey_cookie_duration'); ?>
                       </div>
                       <div class='col-2'>
-                      <input type='text' class='form-control form-control-sm' id='personal_saltkey_cookie_duration' value='<?php echo $SETTINGS['personal_saltkey_cookie_duration'] ?? '31'; ?>'>
+                      <input type='text' class='form-control form-control-sm' id='personal_saltkey_cookie_duration' value='<?php echo htmlspecialchars($SETTINGS['personal_saltkey_cookie_duration']) ?? '31'; ?>'>
                       </div>
                   </div>
 
@@ -553,7 +565,7 @@ $zones = timezone_list();
                                     <?php echo $lang->get('settings_otv_expiration_period'); ?>
                                 </div>
                                 <div class='col-2'>
-                                    <input type='number' class='form-control form-control-sm' id='otv_expiration_period' value='<?php echo $SETTINGS['otv_expiration_period'] ?? '7'; ?>'>
+                                    <input type='number' class='form-control form-control-sm' id='otv_expiration_period' value='<?php echo htmlspecialchars($SETTINGS['otv_expiration_period']) ?? '7'; ?>'>
                                 </div>
                             </div>
 
@@ -565,7 +577,7 @@ $zones = timezone_list();
                                     </small>
                                 </div>
                                 <div class='col-sm-12'>
-                                    <input type='text' class='form-control form-control-sm' id='otv_subdomain' value='<?php echo isset($SETTINGS['otv_subdomain']) === true ? $SETTINGS['otv_subdomain'] : ''; ?>'>
+                                    <input type='text' class='form-control form-control-sm' id='otv_subdomain' value='<?php echo isset($SETTINGS['otv_subdomain']) === true ? htmlspecialchars($SETTINGS['otv_subdomain']) : ''; ?>'>
                                 </div>
                             </div>
                         </div>
@@ -730,7 +742,7 @@ $zones = timezone_list();
                                 </small>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='password_overview_delay' value='<?php echo isset($SETTINGS['password_overview_delay']) === true ? $SETTINGS['password_overview_delay'] : '4'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='password_overview_delay' value='<?php echo isset($SETTINGS['password_overview_delay']) === true ? htmlspecialchars($SETTINGS['password_overview_delay']) : '4'; ?>'>
                             </div>
                         </div>
 
@@ -794,7 +806,7 @@ $zones = timezone_list();
                                         );
                                         foreach ($roles as $role) {
                                             echo '
-                                    <option value="' . $role['id'] . '"', in_array($role['id'], $arrRolesToPrint) === true ? ' selected' : '', '>' . addslashes($role['title']) . '</option>';
+                                    <option value="' . htmlspecialchars($role['id']) . '"', in_array($role['id'], $arrRolesToPrint) === true ? ' selected' : '', '>' . htmlspecialchars(addslashes($role['title'])) . '</option>';
                                         }
                                     }
                                     ?>
@@ -870,9 +882,22 @@ $zones = timezone_list();
                                 </small>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='clipboard_life_duration' value='<?php echo isset($SETTINGS['clipboard_life_duration']) === true ? $SETTINGS['clipboard_life_duration'] : '30'; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='clipboard_life_duration' value='<?php echo isset($SETTINGS['clipboard_life_duration']) === true ? htmlspecialchars($SETTINGS['clipboard_life_duration']) : '30'; ?>'>
                             </div>
                         </div>
+
+                        <div class='row mb-2 option' data-keywords="display tree counter">
+                            <div class='col-10'>
+                                <?php echo $lang->get('show_item_data'); ?>
+                                <small class='form-text text-muted'>
+                                    <?php echo $lang->get('show_item_data_tip'); ?>
+                                </small>
+                            </div>
+                            <div class='col-2'>
+                                <div class='toggle toggle-modern' id='show_item_data' data-toggle-on='<?php echo isset($SETTINGS['show_item_data']) === true && $SETTINGS['show_item_data'] === '1' ? 'true' : 'false'; ?>'></div><input type='hidden' id='show_item_data_input' value='<?php echo isset($SETTINGS['show_item_data']) && $SETTINGS['show_item_data'] === '1' ? '1' : '0'; ?>' />
+                            </div>
+                        </div>
+
 
                         <div class='row mb-2 option' data-keywords="display optimization description">
                             <div class='col-10'>
@@ -899,6 +924,43 @@ if (isset($SETTINGS['show_description']) === true && $SETTINGS['show_description
 <?php
 }
 ?>
+
+                        <div class='row mb-2 option' data-keywords="query display optimization">
+                            <div class='col-10'>
+                                <?php echo $lang->get('limited_search_default'); ?>
+                                <small class='form-text text-muted'>
+                                    <?php echo $lang->get('limited_search_default_tip'); ?>
+                                </small>
+                            </div>
+                            <div class='col-2'>
+                                <div class='toggle toggle-modern' id='limited_search_default' data-toggle-on='<?php echo isset($SETTINGS['limited_search_default']) === true && $SETTINGS['limited_search_default'] === '1' ? 'true' : 'false'; ?>'></div><input type='hidden' id='limited_search_default_input' value='<?php echo isset($SETTINGS['limited_search_default']) && $SETTINGS['limited_search_default'] === '1' ? '1' : '0'; ?>' />
+                            </div>
+                        </div>
+
+                        <div class='row mb-2 option' data-keywords="query display optimization">
+                            <div class='col-10'>
+                                <?php echo $lang->get('highlight_selected'); ?>
+                                <small class='form-text text-muted'>
+                                    <?php echo $lang->get('highlight_selected_tip'); ?>
+                                </small>
+                            </div>
+                            <div class='col-2'>
+                                <div class='toggle toggle-modern' id='highlight_selected' data-toggle-on='<?php echo isset($SETTINGS['highlight_selected']) === true && $SETTINGS['highlight_selected'] === '1' ? 'true' : 'false'; ?>'></div><input type='hidden' id='highlight_selected_input' value='<?php echo isset($SETTINGS['highlight_selected']) && $SETTINGS['highlight_selected'] === '1' ? '1' : '0'; ?>' />
+                            </div>
+                        </div>
+
+                        <div class='row mb-2 option' data-keywords="query display optimization">
+                            <div class='col-10'>
+                                <?php echo $lang->get('highlight_favorites'); ?>
+                                <small class='form-text text-muted'>
+                                    <?php echo $lang->get('highlight_favorites_tip'); ?>
+                                </small>
+                            </div>
+                            <div class='col-2'>
+                                <div class='toggle toggle-modern' id='highlight_favorites' data-toggle-on='<?php echo isset($SETTINGS['highlight_favorites']) === true && $SETTINGS['highlight_favorites'] === '1' ? 'true' : 'false'; ?>'></div><input type='hidden' id='highlight_favorites_input' value='<?php echo isset($SETTINGS['highlight_favorites']) && $SETTINGS['highlight_favorites'] === '1' ? '1' : '0'; ?>' />
+                            </div>
+                        </div>
+
                         <div class='row mb-2 option' data-keywords="query display optimization">
                             <div class='col-10'>
                                 <?php echo $lang->get('nb_items_by_query'); ?>
@@ -907,7 +969,7 @@ if (isset($SETTINGS['show_description']) === true && $SETTINGS['show_description
                                 </small>
                             </div>
                             <div class='col-2'>
-                                <input type='text' class='form-control form-control-sm' id='nb_items_by_query' value='<?php echo isset($SETTINGS['nb_items_by_query']) === true ? $SETTINGS['nb_items_by_query'] : ''; ?>'>
+                                <input type='text' class='form-control form-control-sm' id='nb_items_by_query' value='<?php echo isset($SETTINGS['nb_items_by_query']) === true ? htmlspecialchars($SETTINGS['nb_items_by_query']) : ''; ?>'>
                             </div>
                         </div>
 
@@ -992,7 +1054,7 @@ if (isset($SETTINGS['show_description']) === true && $SETTINGS['show_description
                                 <?php echo $lang->get('syslog_host'); ?>
                             </div>
                             <div class='col-5'>
-                                <input type='text' class='form-control form-control-sm' id='syslog_host' value='<?php echo isset($SETTINGS['syslog_host']) === true ? $SETTINGS['syslog_host'] : ''; ?>'>
+                                <input type='text' class='form-control form-control-sm' id='syslog_host' value='<?php echo isset($SETTINGS['syslog_host']) === true ? htmlspecialchars($SETTINGS['syslog_host']) : ''; ?>'>
                             </div>
                         </div>
 
@@ -1001,7 +1063,7 @@ if (isset($SETTINGS['show_description']) === true && $SETTINGS['show_description
                                 <?php echo $lang->get('syslog_port'); ?>
                             </div>
                             <div class='col-2'>
-                                <input type='number' class='form-control form-control-sm' id='syslog_port' value='<?php echo isset($SETTINGS['syslog_port']) === true ? $SETTINGS['syslog_port'] : ''; ?>'>
+                                <input type='number' class='form-control form-control-sm' id='syslog_port' value='<?php echo isset($SETTINGS['syslog_port']) === true ? htmlspecialchars($SETTINGS['syslog_port']) : ''; ?>'>
                             </div>
                         </div>
 

@@ -31,7 +31,7 @@ declare(strict_types=1);
 
 
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use EZimuel\PHPSecureSession;
 use TeampassClasses\PerformChecks\PerformChecks;
@@ -45,11 +45,11 @@ require_once 'main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 $antiXss = new AntiXSS();
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -275,10 +275,10 @@ foreach ($rows as $record) {
                 ).
                 ((in_array($record['id'], [OTV_USER_ID, TP_USER_ID, SSH_USER_ID, API_USER_ID]) === false && (int) $record['pw_passwordlib'] === 1) ? '<i class=\"fa-solid fa-person-walking-luggage infotip ml-1\" style=\"color:Tomato\" title=\"Old password encryption. Shall login to initialize.\"></i>' : '');
         }
-        
+
         $sOutput .= '["<span data-id=\"'.$record['id'].'\" data-fullname=\"'.
-            addslashes(str_replace("'", '&lsquo;', empty($record['name']) === false ? $record['name'] : '')).' '.
-            addslashes(str_replace("'", '&lsquo;', empty($record['lastname']) === false ? $record['lastname'] : '')).
+            (empty($record['name']) === false ? htmlentities($record['name'], ENT_QUOTES|ENT_SUBSTITUTE|ENT_DISALLOWED) : '').' '.
+            (empty($record['lastname']) === false ? htmlentities($record['lastname'], ENT_QUOTES|ENT_SUBSTITUTE|ENT_DISALLOWED) : '').
             '\" data-auth-type=\"'.$record['auth_type'].'\" data-special=\"'.$record['special'].'\" data-mfa-enabled=\"'.$record['mfa_enabled'].'\" data-otp-provided=\"'.(isset($record['otp_provided']) === true ? $record['otp_provided'] : '').'\"></span>", ';
         //col2
         $sOutput .= '"'.
@@ -350,5 +350,4 @@ if (count($rows) > 0) {
     $sOutput .= '[]';
 }
 
-//echo ($sOutput).'}';
-echo $antiXss->xss_clean($sOutput.'}');
+echo ($sOutput).'}';

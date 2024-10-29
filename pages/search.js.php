@@ -32,7 +32,7 @@ declare(strict_types=1);
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 
 // Load functions
@@ -41,14 +41,14 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 if ($session->get('key') === null) {
     die('Hacking attempt...');
 }
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -247,10 +247,9 @@ $var['hidden_asterisk'] = '<i class="fas fa-asterisk mr-2"></i><i class="fas fa-
                         '<div class="card-body">' +
                         (data.description === '' ? '' : '<div class="form-group">' + data.description + '</div>') +
                         '<div class="form-group">' +
-                        '<label class="form-group-label"><?php echo $lang->get('pw'); ?>' +
-                        '<button type="button" class="btn btn-gray ml-2" id="btn-copy-pwd" data-id="' + data.item_key + '" data-label="' + data.label + '"><i class="fas fa-copy"></i></button>' +
-                        '<button type="button" class="btn btn-gray btn-show-pwd ml-2" data-id="' + data.id + '"><i class="fas fa-eye pwd-show-spinner"></i></button>' +
-                        '</label>' +
+                        '<?php echo $lang->get('pw'); ?>' +
+                        '<button type="button" class="btn btn-secondary ml-2" id="btn-copy-pwd" data-id="' + data.id + '" data-label="' + data.label + '"><i class="fas fa-copy"></i></button>' +
+                        '<button type="button" class="btn btn-secondary btn-show-pwd ml-2" data-id="' + data.id + '"><i class="fas fa-eye pwd-show-spinner"></i></button>' +
                         '<span id="pwd-show_' + data.id + '" class="unhide_masked_data ml-2" style="height: 20px;"><?php echo $var['hidden_asterisk']; ?></span>' +
                         '<input id="pwd-hidden_' + data.id + '" class="pwd-clear" type="hidden" value="' + atob(data.pw).utf8Decode() + '">' +
                         '<input type="hidden" id="pwd-is-shown_' + data.id + '" value="0">' +
@@ -258,14 +257,14 @@ $var['hidden_asterisk'] = '<i class="fas fa-asterisk mr-2"></i><i class="fas fa-
                         (data.login === '' ? '' :
                             '<div class="form-group">' +
                             '<label class="form-group-label"><?php echo $lang->get('index_login'); ?>' +
-                            '<button type="button" class="btn btn-gray ml-2" id="btn-copy-login" data-id="' + data.id + '"><i class="fas fa-copy"></i></button>' +
+                            '<button type="button" class="btn btn-secondary ml-2" id="btn-copy-login" data-id="' + data.id + '"><i class="fas fa-copy"></i></button>' +
                             '</label>' +
                             '<span class="ml-2" id="login-item_' + data.id + '">' + data.login + '</span>' +
                             '</div>') +
                         (data.url === '' ? '' :
                             '<div class="form-group">' +
                             '<label class="form-group-label"><?php echo $lang->get('url'); ?>' +
-                            '<button type="button" class="btn btn-gray ml-2" id="btn-copy-url" data-id="' + data.id + '"><i class="fas fa-copy"></i></button>' +
+                            '<button type="button" class="btn btn-secondary ml-2" id="btn-copy-url" data-id="' + data.id + '"><i class="fas fa-copy"></i></button>' +
                             '</label>' +
                             '<span class="ml-2" id="url-item_' + data.id + '">' + data.url + '</span>' +
                             '</div>') +
@@ -293,52 +292,9 @@ $var['hidden_asterisk'] = '<i class="fas fa-asterisk mr-2"></i><i class="fas fa-
 
                 // Manage buttons --> PASSWORD
                 new ClipboardJS('#btn-copy-pwd', {
-                        text: function(trigger) {
-                            // Send query and get password
-                            var result = '',
-                                error = false;
-
-                            // Warn user that it starts
-                            toastr.remove();
-                            toastr.info(
-                                '<i class="fas fa-circle-notch fa-spin fa-2x"></i>'
-                            );
-
-                            $.ajax({
-                                type: "POST",
-                                async: false,
-                                url: 'sources/items.queries.php',
-                                data: 'type=show_item_password&item_key=' + $('#btn-copy-pwd').data('id') +
-                                    '&key=<?php echo $session->get('key'); ?>',
-                                dataType: "",
-                                success: function(data) {
-                                    //decrypt data
-                                    try {
-                                        data = prepareExchangedData(data, "decode", "<?php echo $session->get('key'); ?>");
-                                    } catch (e) {
-                                        // error
-                                        toastr.remove();
-                                        toastr.warning(
-                                            '<?php echo $lang->get('no_item_to_display'); ?>'
-                                        );
-                                        return false;
-                                    }
-                                    console.log(data)
-                                    if (data.error === true) {
-                                        error = true;
-                                    } else {
-                                        if (data.password_error !== '') {
-                                            error = true;
-                                        } else {
-                                            result = atob(data.password).utf8Decode();
-                                        }
-                                    }
-
-                                    // Remove cog
-                                    toastr.remove();
-                                }
-                            });
-                            return result;
+                        text: function(trigger) {                           
+                            // Read password
+                            return $('#pwd-hidden_' + $('#btn-copy-pwd').data('id')).val();
                         }
                     })
                     .on('success', function(e) {
@@ -355,7 +311,7 @@ $var['hidden_asterisk'] = '<i class="fas fa-asterisk mr-2"></i><i class="fas fa-
                                 '<?php echo $lang->get('copy_to_clipboard'); ?>',
                                 '', {
                                     timeOut: 2000,
-                                    positionClass: 'toast-top-right',
+                                    positionClass: 'toast-bottom-right',
                                     progressBar: true
                                 }
                             );
@@ -390,7 +346,7 @@ $var['hidden_asterisk'] = '<i class="fas fa-asterisk mr-2"></i><i class="fas fa-
                             '<?php echo $lang->get('copy_to_clipboard'); ?>',
                             '', {
                                 timeOut: 2000,
-                                positionClass: 'toast-top-right',
+                                positionClass: 'toast-bottom-right',
                                 progressBar: true
                             }
                         );
@@ -409,7 +365,7 @@ $var['hidden_asterisk'] = '<i class="fas fa-asterisk mr-2"></i><i class="fas fa-
                             '<?php echo $lang->get('copy_to_clipboard'); ?>',
                             '', {
                                 timeOut: 2000,
-                                positionClass: 'toast-top-right',
+                                positionClass: 'toast-bottom-right',
                                 progressBar: true
                             }
                         );
@@ -500,9 +456,7 @@ $var['hidden_asterisk'] = '<i class="fas fa-asterisk mr-2"></i><i class="fas fa-
 
             $('#pwd-show_' + itemId)
                 .html(
-                    '<span style="cursor:none;">' +
-                    simplePurifier($('#pwd-hidden_' + itemId).val(), false, false, false, false) +
-                    '</span>'
+                    $('<span style="cursor:none;">').text($('#pwd-hidden_' + itemId).val()).html()
                 );
 
             // log password is shown

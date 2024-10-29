@@ -37,6 +37,8 @@ use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\NestedTree\NestedTree;
 use Duo\DuoUniversal\Client;
 use Duo\DuoUniversal\DuoException;
+use TeampassClasses\EmailService\EmailSettings;
+use TeampassClasses\EmailService\EmailService;
 
 // Load functions
 require_once 'main.functions.php';
@@ -45,7 +47,7 @@ $request = SymfonyRequest::createFromGlobals();
 loadClasses('DB');
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -186,7 +188,7 @@ switch ($post_type) {
 
         if (!empty($return)) {
             // get a token
-            $token = GenerateCryptKey(20, false, true, true, false, true, $SETTINGS);
+            $token = GenerateCryptKey(20, false, true, true, false, true);
 
             //save file
             $filename = time() . '-' . $token . '.sql';
@@ -217,7 +219,7 @@ switch ($post_type) {
             }
 
             //generate 2d key
-            $session->set('user-key_tmp', GenerateCryptKey(20, false, true, true, false, true, $SETTINGS));
+            $session->set('user-key_tmp', GenerateCryptKey(20, false, true, true, false, true));
 
             //update LOG
             logEvents($SETTINGS, 'admin_action', 'dataBase backup', (string) $session->get('user-id'), $session->get('user-login'));
@@ -463,70 +465,8 @@ switch ($post_type) {
         );
         break;
 
-        /*
-       * REBUILD CONFIG FILE
-    */
-    case 'admin_action_rebuild_config_file':
-        // Check KEY
-        if ($post_key !== $session->get('key')) {
-            echo prepareExchangedData(
-                [
-                    'error' => true,
-                    'message' => $lang->get('key_is_not_correct'),
-                ],
-                'encode'
-            );
-            break;
-        }
-        // Is admin?
-        if ($session->get('user-admin') === 1) {
-            echo prepareExchangedData(
-                array(
-                    'error' => true,
-                    'message' => $lang->get('error_not_allowed_to'),
-                ),
-                'encode'
-            );
-            break;
-        }
 
-        // Perform
-        include_once $SETTINGS['cpassman_dir'] . '/sources/main.functions.php';
-        $ret = handleConfigFile('rebuild', $SETTINGS);
-
-        // Log
-        logEvents(
-            $SETTINGS,
-            'system',
-            'admin_action_rebuild_config_file',
-            (string) $session->get('user-id'),
-            $session->get('user-login'),
-            $ret === true ? 'success' : $ret
-        );
-
-        if ($ret !== true) {
-            echo prepareExchangedData(
-                array(
-                    'error' => true,
-                    'message' => $ret,
-                ),
-                'encode'
-            );
-            break;
-        }
-
-        echo prepareExchangedData(
-            array(
-                'error' => false,
-                'message' => $lang->get('last_execution') . ' ' .
-                    date($SETTINGS['date_format'] . ' ' . $SETTINGS['time_format'], (int) time()) .
-                    '<i class="fas fa-check text-success ml-2"></i>',
-            ),
-            'encode'
-        );
-        break;
-
-        /*
+    /*
     * Change SALT Key START
     */
     case 'admin_action_change_salt_key___start':
@@ -1229,12 +1169,15 @@ switch ($post_type) {
             require_once $SETTINGS['cpassman_dir'] . '/sources/main.functions.php';
 
             //send email
-            sendEmail(
+            $emailSettings = new EmailSettings($SETTINGS);
+            $emailService = new EmailService();
+            $emailService->sendMail(
                 $lang->get('admin_email_test_subject'),
                 $lang->get('admin_email_test_body'),
                 $session->get('user-email'),
-                $SETTINGS
+                $emailSettings
             );
+            
             echo prepareExchangedData(
                 array(
                     'error' => false,
@@ -1262,6 +1205,8 @@ switch ($post_type) {
         }
 
         include_once $SETTINGS['cpassman_dir'] . '/sources/main.functions.php';
+        $emailSettings = new EmailSettings($SETTINGS);
+        $emailService = new EmailService();
 
         $rows = DB::query(
             'SELECT *
@@ -1278,13 +1223,14 @@ switch ($post_type) {
             // Only treat first email
             foreach ($rows as $record) {
                 //send email
+                $email = $emailService->sendMail(
+                    $record['subject'],
+                    $record['body'],
+                    $record['receivers'],
+                    $emailSettings
+                );
                 $ret = json_decode(
-                    sendEmail(
-                        $record['subject'],
-                        $record['body'],
-                        $record['receivers'],
-                        $SETTINGS
-                    ),
+                    $email,
                     true
                 );
 
@@ -1352,16 +1298,21 @@ switch ($post_type) {
 
         include_once $SETTINGS['cpassman_dir'] . '/sources/main.functions.php';
 
+        // Instatiate email settings and service
+        $emailSettings = new EmailSettings($SETTINGS);
+        $emailService = new EmailService();
+
         $rows = DB::query('SELECT * FROM ' . prefixTable('emails') . ' WHERE status = %s OR status = %s', 'not_sent', '');
         foreach ($rows as $record) {
             //send email
+            $email = $emailService->sendMail(
+                $record['subject'],
+                $record['body'],
+                $record['receivers'],
+                $emailSettings
+            );
             $ret = json_decode(
-                sendEmail(
-                    $record['subject'],
-                    $record['body'],
-                    $record['receivers'],
-                    $SETTINGS
-                ),
+                $email,
                 true
             );
 
@@ -1633,7 +1584,7 @@ switch ($post_type) {
         if (null !== $post_action && $post_action === 'add') {
             // Generate KEY
             require_once 'main.functions.php';
-            $key = GenerateCryptKey(39, false, true, true, false, true, $SETTINGS);
+            $key = GenerateCryptKey(39, false, true, true, false, true);
 
             // Generate objectKey
             //$object = doDataEncryption($key, SECUREFILE.':'.$timestamp);
@@ -1973,9 +1924,6 @@ switch ($post_type) {
                 );
             }
             $SETTINGS['ga_website_name'] = htmlspecialchars_decode($dataReceived['ga_website_name']);
-
-            // save change in config file
-            handleConfigFile('update', $SETTINGS, 'ga_website_name', $SETTINGS['ga_website_name']);
         } else {
             $SETTINGS['ga_website_name'] = '';
         }
@@ -2165,6 +2113,7 @@ switch ($post_type) {
                 );
             }
         } else {
+            // Update DB settings
             DB::update(
                 prefixTable('misc'),
                 array(
@@ -2175,6 +2124,7 @@ switch ($post_type) {
                 'admin',
                 $post_field
             );
+
             // in case of stats enabled, update the actual time
             if ($post_field === 'send_stats') {
                 // Check if previous time exists, if not them insert this value in DB
@@ -2234,16 +2184,11 @@ switch ($post_type) {
             );
         }
 
+        // Avoid break tp.config.php file with ' in parameter.
+        $dataReceived['value'] = addslashes($dataReceived['value']);
+
         // store in SESSION
         $SETTINGS[$post_field] = $post_value;
-
-        // save change in config file
-        handleConfigFile(
-            'update',
-            $SETTINGS,
-            $post_field,
-            $dataReceived['value']
-        );
 
         // Encrypt data to return
         echo prepareExchangedData(
@@ -2321,9 +2266,6 @@ switch ($post_type) {
             $SETTINGS['send_stats'] = '0';
         }
 
-        // save change in config file
-        handleConfigFile('update', $SETTINGS, 'send_stats', $SETTINGS['send_stats']);
-
         // send statistics items
         if (null !== $post_list) {
             DB::query('SELECT * FROM ' . prefixTable('misc') . ' WHERE type = %s AND intitule = %s', 'admin', 'send_statistics_items');
@@ -2354,9 +2296,6 @@ switch ($post_type) {
         } else {
             $SETTINGS['send_statistics_items'] = '';
         }
-
-        // save change in config file
-        handleConfigFile('update', $SETTINGS, 'send_statistics_items', $SETTINGS['send_statistics_items']);
 
         // send data
         echo '[{"error" : false}]';

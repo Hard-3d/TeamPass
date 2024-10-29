@@ -27,9 +27,11 @@
  */
 
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 use TeampassClasses\ConfigManager\ConfigManager;
+use TeampassClasses\EmailService\EmailService;
+use TeampassClasses\EmailService\EmailSettings;
 
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -37,10 +39,10 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses('DB');
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -64,6 +66,8 @@ $logID = doLog('start', 'sending_email', (isset($SETTINGS['enable_tasks_log']) =
 // Manage emails to send in queue.
 // Only manage 10 emails at time
 DB::debugmode(false);
+$emailSettings = new EmailSettings($SETTINGS);
+$emailService = new EmailService();
 $rows = DB::query(
     'SELECT *
     FROM ' . prefixTable('background_tasks') . '
@@ -85,17 +89,27 @@ foreach ($rows as $record) {
         'increment_id = %i',
         $record['increment_id']
     );
-
+    
+    // if email.encryptedUserPassword is set, decrypt it
+    if (isset($email['encryptedUserPassword']) === true) {
+        $userPassword = cryption($email['encryptedUserPassword'], '', 'decrypt', $SETTINGS)['string'];
+        $email['body'] = str_replace('#password#', $userPassword, $email['body']);
+    }
+    
     // send email
-    sendEmail(
+    $emailService->sendMail(
         $email['subject'],
         $email['body'],
         $email['receivers'],
-        $SETTINGS,
+        $emailSettings,
         null,
         true,
         true
     );
+
+    // Clear body content and encryptedUserPassword
+    $email['body'] = '<cleared>';
+    $email['encryptedUserPassword'] = '<cleared>';
 
     // update DB
     DB::update(
@@ -104,6 +118,7 @@ foreach ($rows as $record) {
             'updated_at' => time(),
             'finished_at' => time(),
             'is_in_progress' => -1,
+            'arguments' => json_encode($email),
         ),
         'increment_id = %i',
         $record['increment_id']
@@ -129,6 +144,9 @@ function sendEmailsNotSent(
     array $SETTINGS
 )
 {
+    $emailSettings = new EmailSettings($SETTINGS);
+    $emailService = new EmailService();
+    
     //if ((int) $SETTINGS['enable_backlog_mail'] === 1) {
         $row = DB::queryFirstRow(
             'SELECT valeur FROM ' . prefixTable('misc') . ' WHERE type = %s AND intitule = %s',
@@ -146,11 +164,11 @@ function sendEmailsNotSent(
             foreach ($rows as $record) {
                 // Send email
                 json_decode(
-                    sendEmail(
+                    $emailService->sendMail(
                         $record['subject'],
                         $record['body'],
                         $record['receivers'],
-                        $SETTINGS,
+                        $emailSettings,
                         null,
                         true,
                         true

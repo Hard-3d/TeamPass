@@ -28,6 +28,7 @@
 
 use TeampassClasses\SuperGlobal\SuperGlobal;
 use TeampassClasses\Language\Language;
+use TeampassClasses\ConfigManager\ConfigManager;
 
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -40,13 +41,16 @@ error_reporting(E_ERROR | E_PARSE);
 set_time_limit(600);
 $_SESSION['CPM'] = 1;
 
+// Load config
+$configManager = new ConfigManager();
+$SETTINGS = $configManager->getAllSettings();
+
 //include librairies
 require_once '../includes/language/english.php';
 require_once '../includes/config/include.php';
 require_once '../includes/config/settings.php';
 require_once 'tp.functions.php';
 require_once 'libs/aesctr.php';
-require_once '../includes/config/tp.config.php';
 
 // Get the encrypted password
 define('DB_PASSWD_CLEAR', defuse_return_decrypted(DB_PASSWD));
@@ -60,24 +64,17 @@ $database = DB_NAME;
 $port = DB_PORT;
 $user = DB_USER;
 
-if (mysqli_connect(
+$db_link = mysqli_connect(
     $server,
     $user,
     $pass,
     $database,
     $port
-)) {
-    $db_link = mysqli_connect(
-        $server,
-        $user,
-        $pass,
-        $database,
-        $port
-    );
+);
+if ($db_link) {
+    $db_link->set_charset(DB_ENCODING);
 } else {
-    $res = 'Impossible to get connected to server. Error is: ' . addslashes(mysqli_connect_error());
     echo '[{"finish":"1", "msg":"", "error":"Impossible to get connected to server. Error is: ' . addslashes(mysqli_connect_error()) . '!"}]';
-    mysqli_close($db_link);
     exit();
 }
 
@@ -373,6 +370,18 @@ if ($result) {
     }
 }
 
+// Add field allowed_to_create to api table
+$res = addColumnIfNotExist(
+    $pre . 'api',
+    'allowed_to_read',
+    "INT(1) NOT NULL DEFAULT '0';"
+);
+if ($res === false) {
+    echo '[{"finish":"1", "msg":"", "error":"An error appears when adding field allowed_to_read to table api! ' . mysqli_error($db_link) . '!"}]';
+    mysqli_close($db_link);
+    exit();
+}
+
 // Alter type for column 'allowed_to_read' in table api
 modifyColumn(
     $pre . 'api',
@@ -407,14 +416,205 @@ if (intval($tmp) === 0) {
     );
 }
 
+// Add index and change created/updated/finished_at type.
+try {
+    $alter_table_query = "
+        ALTER TABLE `" . $pre . "background_tasks_logs`
+        ADD INDEX idx_created_at (`created_at`),
+        MODIFY `created_at` INT,
+        MODIFY `updated_at` INT,
+        MODIFY `finished_at` INT
+    ";
+    mysqli_begin_transaction($db_link);
+    mysqli_query($db_link, $alter_table_query);
+    mysqli_commit($db_link);
+} catch (Exception $e) {
+    // Rollback transaction if index already exists.
+    mysqli_rollback($db_link);
+}
+
+// Add index on sharekeys_items.
+try {
+    $alter_table_query = "
+        ALTER TABLE `" . $pre . "sharekeys_items`
+        ADD INDEX idx_object_user (`object_id`, `user_id`)
+    ";
+    mysqli_begin_transaction($db_link);
+    mysqli_query($db_link, $alter_table_query);
+    mysqli_commit($db_link);
+} catch (Exception $e) {
+    // Rollback transaction if index already exists.
+    mysqli_rollback($db_link);
+}
+
+// Add index on items.
+try {
+    $alter_table_query = "
+        ALTER TABLE `" . $pre . "items`
+        ADD INDEX items_perso_id_idx (`perso`, `id`)
+    ";
+    mysqli_begin_transaction($db_link);
+    mysqli_query($db_link, $alter_table_query);
+    mysqli_commit($db_link);
+} catch (Exception $e) {
+    // Rollback transaction if index already exists.
+    mysqli_rollback($db_link);
+}
+
+// Add index on log_items.
+try {
+    $alter_table_query = "
+        ALTER TABLE `" . $pre . "log_items`
+        ADD INDEX log_items_item_action_user_idx (`id_item`, `action`, `id_user`)
+    ";
+    mysqli_begin_transaction($db_link);
+    mysqli_query($db_link, $alter_table_query);
+    mysqli_commit($db_link);
+} catch (Exception $e) {
+    // Rollback transaction if index already exists.
+    mysqli_rollback($db_link);
+}
+
+// Add new setting 'show_item_data'
+$tmp = mysqli_num_rows(mysqli_query($db_link, "SELECT * FROM `" . $pre . "misc` WHERE type = 'admin' AND intitule = 'show_item_data'"));
+if (intval($tmp) === 0) {
+    mysqli_query(
+        $db_link,
+        "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`) VALUES ('admin', 'show_item_data', '0')"
+    );
+}
+
+// Add field split_view_mode to users table
+$res = addColumnIfNotExist(
+    $pre . 'users',
+    'split_view_mode',
+    "tinyint(1) NOT null DEFAULT '0';"
+);
+if ($res === false) {
+    echo '[{"finish":"1", "msg":"", "error":"An error appears when adding field split_view_mode to table users! ' . mysqli_error($db_link) . '!"}]';
+    mysqli_close($db_link);
+    exit();
+}
+
+// Add new setting 'limited_search_default'
+$tmp = mysqli_num_rows(mysqli_query($db_link, "SELECT * FROM `" . $pre . "misc` WHERE type = 'admin' AND intitule = 'limited_search_default'"));
+if (intval($tmp) === 0) {
+    mysqli_query(
+        $db_link,
+        "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`) VALUES ('admin', 'limited_search_default', '0')"
+    );
+}
+
+// Add new setting 'highlight_selected'
+$tmp = mysqli_num_rows(mysqli_query($db_link, "SELECT * FROM `" . $pre . "misc` WHERE type = 'admin' AND intitule = 'highlight_selected'"));
+if (intval($tmp) === 0) {
+    mysqli_query(
+        $db_link,
+        "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`) VALUES ('admin', 'highlight_selected', '0')"
+    );
+}
+
+// Add new setting 'highlight_favorites'
+$tmp = mysqli_num_rows(mysqli_query($db_link, "SELECT * FROM `" . $pre . "misc` WHERE type = 'admin' AND intitule = 'highlight_favorites'"));
+if (intval($tmp) === 0) {
+    mysqli_query(
+        $db_link,
+        "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`) VALUES ('admin', 'highlight_favorites', '0')"
+    );
+}
+
+// Add new setting 'number_users_build_cache_tree'
+$tmp = mysqli_num_rows(mysqli_query($db_link, "SELECT * FROM `" . $pre . "misc` WHERE type = 'admin' AND intitule = 'number_users_build_cache_tree'"));
+if (intval($tmp) === 0) {
+    mysqli_query(
+        $db_link,
+        "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`) VALUES ('admin', 'number_users_build_cache_tree', '10')"
+    );
+}
+
+// Add field is_encrypted to misc table
+$res = addColumnIfNotExist(
+    $pre . 'misc',
+    'is_encrypted',
+    "tinyint(1) NOT NULL DEFAULT '0';"
+);
+if ($res === false) {
+    echo '[{"finish":"1", "msg":"", "error":"An error appears when adding field is_encrypted to table misc! ' . mysqli_error($db_link) . '!"}]';
+    mysqli_close($db_link);
+    exit();
+}
+
+// Force some settings to be encrypted
+mysqli_query(
+    $db_link,
+    "UPDATE `" . $pre . "misc` SET `is_encrypted` = '1' WHERE `intitule` IN ('onthefly-restore-key', 'onthefly-backup-key', 'bck_script_passkey', 'duo_akey', 'duo_ikey', 'duo_skey', 'oauth2_client_secret', 'ldap_password', 'email_auth_pwd')"
+);
+
+// We will remove tp.config.php file
+// For this, we need first to check if it exists
+// And copy each setting to the database if not already there or if different from the one in the database then update it
+// Then rename it and remove the file
+$configFilePath = __DIR__ . '/../includes/config/tp.config.php';
+if (file_exists($configFilePath)) {
+    include $configFilePath;
+    
+    foreach ($SETTINGS as $key => $value) {
+        $escapedKey = mysqli_real_escape_string($db_link, $key);
+        $escapedValue = mysqli_real_escape_string($db_link, $value);
+
+        $query = "SELECT `valeur` FROM `" . $pre . "misc` WHERE `type` = 'admin' AND `intitule` = '$escapedKey'";
+        $result = mysqli_query($db_link, $query);
+
+        if ($result && mysqli_num_rows($result) > 0) {
+            $row = mysqli_fetch_assoc($result);
+            if ($row['valeur'] !== $escapedValue) {
+                $updateQuery = "UPDATE `" . $pre . "misc` SET `valeur` = '$escapedValue', `updated_at` = '" . time() . "' WHERE `type` = 'admin' AND `intitule` = '$escapedKey'";
+                mysqli_query($db_link, $updateQuery);
+            }
+        } else {
+            $insertQuery = "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`, `updated_at`) VALUES ('admin', '$escapedKey', '$escapedValue', '" . time() . "')";
+            mysqli_query($db_link, $insertQuery);
+        }
+    }
+
+    // Rename the file
+    $newConfigFilePath = $configFilePath . '.bak';
+    if (!rename($configFilePath, $newConfigFilePath)) {
+        // Remove the file
+        unlink($configFilePath);
+    } else {
+        // Remove the file
+        unlink($newConfigFilePath);
+    }    
+}
+
 //---<END 3.1.2
 
 
+//--->BEGIN 3.1.3
+
+// Remove from roles_values folders without any access
+$deleteQuery = "DELETE FROM `" . $pre . "roles_values` WHERE type = ''";
+mysqli_query($db_link, $deleteQuery);
+
 //---------------------------------------------------------------------
 
-
-
 //---< END 3.1.X upgrade steps
+
+
+// Save timestamp
+$tmp = mysqli_num_rows(mysqli_query($db_link, "SELECT * FROM `" . $pre . "misc` WHERE type = 'admin' AND intitule = 'upgrade_timestamp'"));
+if (intval($tmp) === 0) {
+    mysqli_query(
+        $db_link,
+        "INSERT INTO `" . $pre . "misc` (`type`, `intitule`, `valeur`) VALUES ('admin', 'upgrade_timestamp', ".time().")"
+    );
+} else {
+    mysqli_query(
+        $db_link,
+        "UPDATE `" . $pre . "misc` SET valeur = ".time()." WHERE type = 'admin' AND intitule = 'upgrade_timestamp'"
+    );
+}
 
 // Close connection
 mysqli_close($db_link);

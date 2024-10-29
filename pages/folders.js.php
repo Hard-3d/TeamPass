@@ -32,7 +32,7 @@ declare(strict_types=1);
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\SessionManager\SessionManager;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
 // Load functions
 require_once __DIR__.'/../sources/main.functions.php';
@@ -40,14 +40,14 @@ require_once __DIR__.'/../sources/main.functions.php';
 // init
 loadClasses();
 $session = SessionManager::getSession();
-$request = Request::createFromGlobals();
+$request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
 if ($session->get('key') === null) {
     die('Hacking attempt...');
 }
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -228,7 +228,8 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
             // Build list
             var selectedFolders = '<ul>';
             $("input:checkbox[class=checkbox-folder]:checked").each(function() {
-                selectedFolders += '<li>' + $('#folder-' + $(this).data('id')).text() + '</li>';
+                var folderText = $('#folder-' + $(this).data('id')).text();
+                selectedFolders += '<li>' + $('<div>').text(folderText).html() + '</li>';
             });
             $('#delete-list').html(selectedFolders + '</ul>');
 
@@ -683,7 +684,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
             '<div class="card-body">' +
             '<div class="form-group ml-2">' +
             '<label for="folder-edit-title"><?php echo $lang->get('label'); ?></label>' +
-            '<input type="text" class="form-control clear-me purify" id="folder-edit-title" data-field="title" value="' + folderTitle + '">' +
+            '<input type="text" class="form-control clear-me purify" id="folder-edit-title" data-field="title">' +
             '</div>' +
             '<div class="form-group ml-2">' +
             '<label for="folder-edit-parent"><?php echo $lang->get('parent'); ?></label><br>' +
@@ -731,6 +732,9 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
             '</td></tr>'
         );
 
+        // XSS Protection
+        $('#folder-edit-title').val(folderTitle);
+
         // Prepare iCheck format for checkboxes
         $('input[type="checkbox"].form-check-input, input[type="radio"].form-radio-input').iCheck({
             radioClass: 'iradio_flat-orange',
@@ -757,6 +761,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
         $('#folder-edit-parent').val(folderParent).change();
         $('#folder-edit-complexity').val(folderComplexity).change();
 
+        $('#folder-edit-renewal').val(folderRenewal).change();
         currentFolderEdited = '';
     });
 
@@ -787,7 +792,7 @@ if ($checkUserAccess->checkSession() === false || $checkUserAccess->userAccessPa
                 'title': purifyRes.arrFields['title'],    //$('#folder-edit-title').val(),
                 'parentId': $('#folder-edit-parent').val(),
                 'complexity': $('#folder-edit-complexity').val(),
-                'renewalPeriod': $('#new-renewal').val() === '' ? 0 : parseInt($('#new-renewal').val()),
+                'renewalPeriod': $('#folder-edit-renewal').val() === '' ? 0 : parseInt($('#folder-edit-renewal').val()),
                 'addRestriction': $('#folder-edit-add-restriction').prop("checked") === true ? 1 : 0,
                 'editRestriction': $('#folder-edit-edit-restriction').prop("checked") === true ? 1 : 0,
                 'icon': purifyRes.arrFields['icon'],    //$('#folder-edit-icon').val(),

@@ -37,6 +37,8 @@ use TeampassClasses\Language\Language;
 use TeampassClasses\PerformChecks\PerformChecks;
 use TeampassClasses\ConfigManager\ConfigManager;
 use TeampassClasses\PasswordManager\PasswordManager;
+use TeampassClasses\EmailService\EmailService;
+use TeampassClasses\EmailService\EmailSettings;
 
 // Load functions
 require_once 'main.functions.php';
@@ -47,7 +49,7 @@ $session = SessionManager::getSession();
 $request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -96,8 +98,89 @@ $password_do_not_change = 'do_not_change';
 $tree = new NestedTree(prefixTable('nested_tree'), 'id', 'parent_id', 'title');
 
 if (null !== $post_type) {
+
+    // List of post types allowed to all users
+    $all_users_can_access = [
+        'get_generate_keys_progress',
+        'user_profile_update',
+        'save_user_change',
+    ];
+
+    // decrypt and retrieve data in JSON format
+    $dataReceived = [];
+    if (!empty($post_data)) {
+        $dataReceived = prepareExchangedData(
+            $post_data,
+            'decode'
+        );
+    }
+
+    // Non-manager use
+    if ((int) $session->get('user-admin') !== 1 &&
+        (int) $session->get('user-manager') !== 1 &&
+        (int) $session->get('user-can_manage_all_users') !== 1) {
+
+        // Administrative type requested -> deny
+        if (!in_array($post_type, $all_users_can_access)) {
+            echo prepareExchangedData(
+                array(
+                    'error' => true,
+                    'message' => $lang->get('error_not_allowed_to'),
+                ),
+                'encode'
+            );
+            exit;
+        } else if (isset($dataReceived['user_id'])) {
+            // If user isn't manager, he can't change user_id
+            $dataReceived['user_id'] = (int) $session->get('user-id');
+        }
+    }
+
+    // For administrative types only, do additional check whether user is manager 
+    // and $dataReceived['user_id'] is defined to ensure that this manager can
+    // modify this user account.
+    if (!in_array($post_type, $all_users_can_access) &&
+        (int) $session->get('user-admin') !== 1 && isset($dataReceived['user_id'])) {
+
+        // Get info about user to modify
+        $targetUserInfos = DB::queryfirstrow(
+            'SELECT admin, gestionnaire, can_manage_all_users, isAdministratedByRole FROM ' . prefixTable('users') . '
+            WHERE id = %i',
+            (int) $dataReceived['user_id']
+        );
+
+        // Managers can't edit administrator or other manager
+        if ((int) $targetUserInfos['admin'] === 1 ||
+            (int) $targetUserInfos['can_manage_all_users'] === 1 ||
+            (int) $targetUserInfos['gestionnaire'] === 1) {
+
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
+                exit;
+            }
+
+        // Manager of basic/ro users in this role
+        if ((int) $session->get('user-manager') === 1
+            && !in_array($targetUserInfos['isAdministratedByRole'], $session->get('user-roles_array'))) {
+
+            echo prepareExchangedData(
+                array(
+                    'error' => true,
+                    'message' => $lang->get('error_not_allowed_to'),
+                ),
+                'encode'
+            );
+            exit;
+        }
+    }
+
     switch ($post_type) {
-            /*
+        /*
          * ADD NEW USER
          */
         case 'add_new_user':
@@ -122,16 +205,21 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
+            // Check if current user can add a new user
+            if ((int) $session->get('user-admin') === 0 && (int) $session->get('user-can_manage_all_users') === 0 && (int) $session->get('user-manager') === 0) {
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
+                break;
+            }
 
             // Prepare variables
             $login = filter_var($dataReceived['login'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
             $email = filter_var($dataReceived['email'], FILTER_SANITIZE_EMAIL);
-            $password = '';//filter_var($dataReceived['pw'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
             $lastname = filter_var($dataReceived['lastname'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
             $name = filter_var($dataReceived['name'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
             $is_admin = filter_var($dataReceived['admin'], FILTER_SANITIZE_NUMBER_INT);
@@ -147,6 +235,20 @@ if (null !== $post_type) {
             $forbidden_flds = filter_var_array($dataReceived['forbidden_flds'], FILTER_SANITIZE_NUMBER_INT);
             $post_root_level = filter_var($dataReceived['form-create-root-folder'], FILTER_SANITIZE_NUMBER_INT);
             $mfa_enabled = filter_var($dataReceived['mfa_enabled'], FILTER_SANITIZE_NUMBER_INT);
+
+            // Only administrators can create managers or administrators accounts.
+            if ((int) $session->get('user-admin') !== 1 
+                && ((int) $is_admin === 1 || (int) $is_manager === 1 || (int) $is_hr === 1)) {
+
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
+                break;
+            }
 
             // Empty user
             if (empty($login) === true) {
@@ -169,18 +271,6 @@ if (null !== $post_type) {
             );
 
             if (DB::count() === 0) {
-                // check if admin role is set. If yes then check if originator is allowed
-                if ($dataReceived['admin'] === true && (int) $session->get('user-admin') !== 1) {
-                    echo prepareExchangedData(
-                        array(
-                            'error' => true,
-                            'message' => $lang->get('error_not_allowed_to'),
-                        ),
-                        'encode'
-                    );
-                    break;
-                }
-
                 // Generate pwd
                 $password = generateQuickPassword();
 
@@ -387,12 +477,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
 
             // Prepare variables
             $post_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
@@ -983,11 +1067,6 @@ if (null !== $post_type) {
         * Migrate the Admin PF to User
         */
         case 'migrate_admin_pf':
-            // decrypt and retreive data in JSON format
-            $dataReceived = prepareExchangedData(
-                filter_input(INPUT_POST, 'data', FILTER_SANITIZE_FULL_SPECIAL_CHARS, FILTER_FLAG_NO_ENCODE_QUOTES),
-                'decode'
-            );
             // Prepare variables
             $user_id = htmlspecialchars_decode($data_received['user_id']);
             $salt_user = htmlspecialchars_decode($data_received['salt_user']);
@@ -1147,12 +1226,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
             
             // Prepare variables
             $post_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
@@ -1184,16 +1257,12 @@ if (null !== $post_type) {
                 $functionsList = array();
                 $selected = '';
                 $users_functions = array_filter(array_unique(explode(';', empty($rowUser['fonction_id'].';'.$rowUser['roles_from_ad_groups']) === true ? '' : $rowUser['fonction_id'].';'.$rowUser['roles_from_ad_groups'])));
-                // array of roles for actual user
-                //$my_functions = explode(';', $rowUser['fonction_id']);
 
                 $rows = DB::query('SELECT id,title,creator_id FROM ' . prefixTable('roles_title'));
                 foreach ($rows as $record) {
                     if (
                         (int) $session->get('user-admin') === 1
-                        || (((int) $session->get('user-manager') === 1 || (int) $session->get('user-can_manage_all_users') === 1)
-                            //&& (in_array($record['id'], $my_functions) || $record['creator_id'] == $session->get('user-id'))
-                            )
+                        || (((int) $session->get('user-manager') === 1 || (int) $session->get('user-can_manage_all_users') === 1))
                     ) {
                         if (in_array($record['id'], $users_functions)) {
                             $selected = 'selected';
@@ -1344,8 +1413,8 @@ if (null !== $post_type) {
 
                 $arrData['error'] = false;
                 $arrData['login'] = $rowUser['login'];
-                $arrData['name'] = empty($rowUser['name']) === false && $rowUser['name'] !== NULL ? htmlspecialchars_decode($rowUser['name'], ENT_QUOTES) : '';
-                $arrData['lastname'] = empty($rowUser['lastname']) === false && $rowUser['lastname'] !== NULL ? htmlspecialchars_decode($rowUser['lastname'], ENT_QUOTES) : '';
+                $arrData['name'] = empty($rowUser['name']) === false && $rowUser['name'] !== NULL ? $rowUser['name'] : '';
+                $arrData['lastname'] = empty($rowUser['lastname']) === false && $rowUser['lastname'] !== NULL ? $rowUser['lastname'] : '';
                 $arrData['email'] = $rowUser['email'];
                 $arrData['function'] = $functionsList;
                 $arrData['managedby'] = $managedBy;
@@ -1406,12 +1475,6 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
-
             // Prepare variables
             $post_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
             $post_login = filter_var($dataReceived['login'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
@@ -1430,9 +1493,16 @@ if (null !== $post_type) {
             $post_root_level = filter_var($dataReceived['form-create-root-folder'], FILTER_SANITIZE_NUMBER_INT);
             $post_mfa_enabled = filter_var($dataReceived['mfa_enabled'], FILTER_SANITIZE_NUMBER_INT);
 
-            // If user disables administrator role 
+            // Get info about user to modify
+            $data_user = DB::queryfirstrow(
+                'SELECT admin, gestionnaire, can_manage_all_users, isAdministratedByRole FROM ' . prefixTable('users') . '
+                WHERE id = %i',
+                $post_id
+            );
+
+            // If user removes administrator role on administrator user
             // then ensure that it exists still one administrator
-            if (empty($post_is_admin) === true) {
+            if ((int) $data_user['admin'] === 1 && (int) $post_is_admin !== 1) {
                 // count number of admins
                 $users = DB::query(
                     'SELECT id
@@ -1460,7 +1530,8 @@ if (null !== $post_type) {
             $adRoles = DB::query(
                 'SELECT roles_from_ad_groups
                 FROM ' . prefixTable('users') . '
-                WHERE id = '. $dataReceived['user_id']
+                WHERE id = %i',
+                $post_id
             )[0]['roles_from_ad_groups'];
             $fonctions = [];
             if (!is_null($post_groups) && !empty($adRoles)) {
@@ -1536,18 +1607,21 @@ if (null !== $post_type) {
                 break;
             }
 
-            // Get info about user to delete
-            $data_user = DB::queryfirstrow(
-                'SELECT admin, isAdministratedByRole FROM ' . prefixTable('users') . '
-                WHERE id = %i',
-                $post_id
-            );
-
             // Is this user allowed to do this?
             if (
+                // Administrator user
                 (int) $session->get('user-admin') === 1
-                || (in_array($data_user['isAdministratedByRole'], $session->get('user-roles_array')))
-                || ((int) $session->get('user-can_manage_all_users') === 1 && (int) $data_user['admin'] !== 1)
+                // Manager of basic/ro users in this role but don't allow promote user to admin or managers roles
+                || ((int) $session->get('user-manager') === 1
+                    && in_array($data_user['isAdministratedByRole'], $session->get('user-roles_array'))
+                    && (int) $post_is_admin !== 1 && (int) $data_user['admin'] !== 1
+                    && (int) $post_is_hr !== 1 && (int) $data_user['can_manage_all_users'] !== 1
+                    && (int) $post_is_manager !== 1 && (int) $data_user['gestionnaire'] !== 1)
+                // Manager of all basic/ro users but don't allow promote user to admin or managers roles
+                || ((int) $session->get('user-can_manage_all_users') === 1
+                    && (int) $post_is_admin !== 1 && (int) $data_user['admin'] !== 1
+                    && (int) $post_is_hr !== 1 && (int) $data_user['can_manage_all_users'] !== 1
+                    && (int) $post_is_manager !== 1 && (int) $data_user['gestionnaire'] !== 1)
             ) {
                 // delete account
                 // delete user in database
@@ -1676,12 +1750,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data, 
-                'decode'
-            );
 
             // Prepare variables
             $post_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
@@ -2059,39 +2127,60 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retreive data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
+            // Prepare variables
+            $data = [
+                'source_id' => isset($dataReceived['source_id']) === true ? $dataReceived['source_id'] : 0,
+                'destination_ids' => isset($dataReceived['destination_ids']) === true ? $dataReceived['destination_ids'] : 0,
+                'user_functions' => isset($dataReceived['user_functions']) === true ? $dataReceived['user_functions'] : '',
+                'user_managedby' => isset($dataReceived['user_managedby']) === true ? $dataReceived['user_managedby'] : '',
+                'user_fldallowed' => isset($dataReceived['user_fldallowed']) === true ? $dataReceived['user_fldallowed'] : '',
+                'user_fldforbid' => isset($dataReceived['user_fldforbid']) === true ? $dataReceived['user_fldforbid'] : '',
+                'user_admin' => isset($dataReceived['user_admin']) === true ? $dataReceived['user_admin'] : 0,
+                'user_manager' => isset($dataReceived['user_manager']) === true ? $dataReceived['user_manager'] : 0,
+                'user_hr' => isset($dataReceived['user_hr']) === true ? $dataReceived['user_hr'] : 0,
+                'user_readonly' => isset($dataReceived['user_readonly']) === true ? $dataReceived['user_readonly'] : 1,
+                'user_personalfolder' => isset($dataReceived['user_personalfolder']) === true ? $dataReceived['user_personalfolder'] : 0,
+                'user_rootfolder' => isset($dataReceived['user_rootfolder']) === true ? $dataReceived['user_rootfolder'] : 0,
+            ];
+            
+            $filters = [
+                'source_id' => 'cast:integer',
+                'destination_ids' => 'trim|escape',
+                'user_functions' => 'trim|escape',
+                'user_managedby' => 'trim|escape',
+                'user_fldallowed' => 'trim|escape',
+                'user_fldforbid' => 'trim|escape',
+                'user_admin' => 'cast:integer',
+                'user_manager' => 'cast:integer',
+                'user_hr' => 'cast:integer',
+                'user_readonly' => 'cast:integer',
+                'user_personalfolder' => 'cast:integer',
+                'user_rootfolder' => 'cast:integer',
+            ];
+            
+            $inputData = dataSanitizer(
+                $data,
+                $filters,
+                $SETTINGS['cpassman_dir']
             );
 
-            $post_source_id = filter_var(htmlspecialchars_decode($dataReceived['source_id']), FILTER_SANITIZE_NUMBER_INT);
-            $post_destination_ids = filter_var_array($dataReceived['destination_ids'], FILTER_SANITIZE_NUMBER_INT);
-            $post_user_functions = filter_var(htmlspecialchars_decode($dataReceived['user_functions']), FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_user_managedby = filter_var(htmlspecialchars_decode($dataReceived['user_managedby']), FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_user_fldallowed = filter_var(htmlspecialchars_decode($dataReceived['user_fldallowed']), FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_user_fldforbid = filter_var(htmlspecialchars_decode($dataReceived['user_fldforbid']), FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-            $post_user_admin = filter_var(htmlspecialchars_decode($dataReceived['user_admin']), FILTER_SANITIZE_NUMBER_INT);
-            $post_user_manager = filter_var(htmlspecialchars_decode($dataReceived['user_manager']), FILTER_SANITIZE_NUMBER_INT);
-            $post_user_hr = filter_var(htmlspecialchars_decode($dataReceived['user_hr']), FILTER_SANITIZE_NUMBER_INT);
-            $post_user_readonly = filter_var(htmlspecialchars_decode($dataReceived['user_readonly']), FILTER_SANITIZE_NUMBER_INT);
-            $post_user_personalfolder = filter_var(htmlspecialchars_decode($dataReceived['user_personalfolder']), FILTER_SANITIZE_NUMBER_INT);
-            $post_user_rootfolder = filter_var(htmlspecialchars_decode($dataReceived['user_rootfolder']), FILTER_SANITIZE_NUMBER_INT);
-
             // Check send values
-            if (
-                empty($post_source_id) === true
-                || $post_destination_ids === 0
-            ) {
+            if ($inputData['source_id'] === 0 || $inputData['destination_ids'] === 0) {
                 // error
-                exit();
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
             }
 
             // Get info about user
             $data_user = DB::queryfirstrow(
                 'SELECT admin, isAdministratedByRole FROM ' . prefixTable('users') . '
                 WHERE id = %i',
-                $post_source_id
+                $inputData['source_id']
             );
 
             // Is this user allowed to do this?
@@ -2100,7 +2189,7 @@ if (null !== $post_type) {
                 || (in_array($data_user['isAdministratedByRole'], $session->get('user-roles_array')))
                 || ((int) $session->get('user-can_manage_all_users') === 1 && (int) $data_user['admin'] !== 1)
             ) {
-                foreach ($post_destination_ids as $dest_user_id) {
+                foreach ($inputData['destination_ids'] as $dest_user_id) {
                     // Is this user allowed to do this?
                     if (
                         (int) $session->get('user-admin') === 1
@@ -2111,16 +2200,16 @@ if (null !== $post_type) {
                         DB::update(
                             prefixTable('users'),
                             array(
-                                'fonction_id' => $post_user_functions,
-                                'isAdministratedByRole' => $post_user_managedby,
-                                'groupes_visibles' => $post_user_fldallowed,
-                                'groupes_interdits' => $post_user_fldforbid,
-                                'gestionnaire' => $post_user_manager,
-                                'read_only' => $post_user_readonly,
-                                'can_create_root_folder' => $post_user_rootfolder,
-                                'personal_folder' => $post_user_personalfolder,
-                                'can_manage_all_users' => $post_user_hr,
-                                'admin' => $post_user_admin,
+                                'fonction_id' => str_replace(",", ";", (string) $inputData['user_functions']),
+                                'isAdministratedByRole' => $inputData['user_managedby'],
+                                'groupes_visibles' => $inputData['user_fldallowed'],
+                                'groupes_interdits' => $inputData['user_fldforbid'],
+                                'gestionnaire' => $inputData['user_manager'],
+                                'read_only' => $inputData['user_readonly'],
+                                'can_create_root_folder' => $inputData['user_rootfolder'],
+                                'personal_folder' => $inputData['user_personalfolder'],
+                                'can_manage_all_users' => $inputData['user_hr'],
+                                'admin' => $inputData['user_admin'],
                             ),
                             'id = %i',
                             $dest_user_id
@@ -2128,6 +2217,14 @@ if (null !== $post_type) {
                     }
                 }
             }
+
+            echo prepareExchangedData(
+                array(
+                    'error' => false,
+                ),
+                'encode'
+            );
+
             break;
 
             /*
@@ -2161,12 +2258,6 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retreive data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
-
             if (empty($dataReceived) === false) {
                 // Sanitize
                 $data = [
@@ -2177,6 +2268,7 @@ if (null !== $post_type) {
                     'agsescardid' => isset($dataReceived['agsescardid']) === true ? $dataReceived['agsescardid'] : '',
                     'name' => isset($dataReceived['name']) === true ? $dataReceived['name'] : '',
                     'lastname' => isset($dataReceived['lastname']) === true ? $dataReceived['lastname'] : '',
+                    'split_view_mode' => isset($dataReceived['split_view_mode']) === true ? $dataReceived['split_view_mode'] : '',
                 ];
                 
                 $filters = [
@@ -2187,12 +2279,21 @@ if (null !== $post_type) {
                     'agsescardid' => 'trim|escape',
                     'name' => 'trim|escape',
                     'lastname' => 'trim|escape',
+                    'split_view_mode' => 'cast:integer',
                 ];
                 
                 $inputData = dataSanitizer(
                     $data,
                     (array) $filters
                 );
+
+                // Prevent LFI.
+                $inputData['language'] = preg_replace('/[^a-z_]/', "", $inputData['language']);
+
+                // Force english if non-existent language.
+                if (!file_exists(__DIR__."/../includes/language/".$inputData['language'].".php")) {
+                    $inputData['language'] = 'english';
+                }
 
                 // update user
                 DB::update(
@@ -2202,9 +2303,10 @@ if (null !== $post_type) {
                         'usertimezone' => $inputData['timezone'],
                         'user_language' => $inputData['language'],
                         'treeloadstrategy' => $inputData['treeloadstrategy'],
-                        'agses-usercardid' => $inputData['agsescardid'],
+                        //'agses-usercardid' => $inputData['agsescardid'],
                         'name' => $inputData['name'],
                         'lastname' => $inputData['lastname'],
+                        'split_view_mode' => $inputData['split_view_mode'],
                     ),
                     'id = %i',
                     $session->get('user-id')
@@ -2218,6 +2320,7 @@ if (null !== $post_type) {
                 $session->set('user-tree_load_strategy', $inputData['treeloadstrategy']);
                 //$_SESSION['user_agsescardid'] = $inputData['agsescardid'];
                 $session->set('user-language', $inputData['language']);
+                $session->set('user-split_view_mode', (int) $inputData['split_view_mode']);
 
             } else {
                 // An error appears on JSON format
@@ -2238,6 +2341,7 @@ if (null !== $post_type) {
                     'name' => $session->get('user-name'),
                     'lastname' => $session->get('user-lastname'),
                     'email' => $session->get('user-email'),
+                    'split_view_mode' => $session->get('user-split_view_mode'),
                 ),
                 'encode'
             );
@@ -2265,12 +2369,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
 
             // prepare variables
             $post_user_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
@@ -2309,15 +2407,36 @@ if (null !== $post_type) {
                 $encrypted_key = encryptUserObjectKey(base64_encode($post_new_value), $session->get('user-public_key'));
                 $session->set('user-api_key', $post_new_value);
 
-                DB::update(
-                    prefixTable('api'),
-                    array(
-                        'value' => $encrypted_key,
-                        'timestamp' => time()
-                    ),
-                    'user_id = %i',
+                // test if user has an api key
+                $data_user = DB::queryfirstrow(
+                    'SELECT value
+                    FROM ' . prefixTable('api') . '
+                    WHERE user_id = %i',
                     $post_user_id
                 );
+                if ($data_user) {
+                    // update
+                    DB::update(
+                        prefixTable('api'),
+                        array(
+                            'value' => $encrypted_key,
+                            'timestamp' => time()
+                        ),
+                        'user_id = %i',
+                        $post_user_id
+                    );
+                } else {
+                    // insert
+                    DB::insert(
+                        prefixTable('api'),
+                        array(
+                            'type' => 'user',
+                            'user_id' => $post_user_id,
+                            'value' => $encrypted_key,
+                            'timestamp' => time()
+                        )
+                    );
+                }
 
                 // send data
                 echo prepareExchangedData(
@@ -2410,7 +2529,11 @@ if (null !== $post_type) {
             
             } catch (\LdapRecord\Auth\BindException $e) {
                 $error = $e->getDetailedError();
-                error_log('TEAMPASS Error - Users - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+                if ($error) {
+                    error_log('TEAMPASS Error - LDAP - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+                } else {
+                    error_log('TEAMPASS Error - LDAP - Code: '.$e->getCode().' - Message: '.$e->getMessage());
+                }
                 // deepcode ignore ServerLeak: No important data is sent and it is encrypted before sending
                 echo prepareExchangedData(
                     array(
@@ -2438,7 +2561,11 @@ if (null !== $post_type) {
                     ->paginate(100);
             } catch (\LdapRecord\Auth\BindException $e) {
                 $error = $e->getDetailedError();
-                error_log('TEAMPASS Error - Users - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+                if ($error) {
+                    error_log('TEAMPASS Error - LDAP - '.$error->getErrorCode()." - ".$error->getErrorMessage(). " - ".$error->getDiagnosticMessage());
+                } else {
+                    error_log('TEAMPASS Error - LDAP - Code: '.$e->getCode().' - Message: '.$e->getMessage());
+                }
                 // deepcode ignore ServerLeak: No important data is sent and it is encrypted before sending
                 echo prepareExchangedData(
                     array(
@@ -2545,12 +2672,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
 
             // Prepare variables
             $post_login = filter_var($dataReceived['login'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
@@ -2691,7 +2812,9 @@ if (null !== $post_type) {
 
             // Send email to new user
             if (isset($SETTINGS['enable_tasks_manager']) === false || (int) $SETTINGS['enable_tasks_manager'] === 0) {
-                sendEmail(
+                $emailSettings = new EmailSettings($SETTINGS);
+                $emailService = new EmailService();
+                $emailService->sendMail(
                     $lang->get('email_subject_new_user'),
                     str_replace(
                         array('#tp_login#', '#enc_code#', '#tp_link#'),
@@ -2699,7 +2822,7 @@ if (null !== $post_type) {
                         $lang->get('email_body_user_added_from_ldap_encryption_code')
                     ),
                     $post_email,
-                    $SETTINGS
+                    $emailSettings
                 );
             }
 
@@ -2711,8 +2834,6 @@ if (null !== $post_type) {
                     'user_code' => $password,
                     'visible_otp' => ADMIN_VISIBLE_OTP_ON_LDAP_IMPORT,
                     'post_action' => isset($SETTINGS['enable_tasks_manager']) === true && (int) $SETTINGS['enable_tasks_manager'] === 1 ? 'prepare_tasks' : 'encrypt_keys',
-                    //'extra' => decryptPrivateKey($password, $userKeys['private_key']),
-                    //'extra2' => $userKeys['private_key'],
                 ),
                 'encode'
             );
@@ -2735,12 +2856,6 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
-
             // Prepare variables
             $post_userId = filter_var($dataReceived['user_id'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
             $post_otp = filter_var($dataReceived['user_new_otp'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
@@ -2761,7 +2876,9 @@ if (null !== $post_type) {
                 WHERE id = %i',
                 $post_userId
             );
-            sendEmail(
+            $emailSettings = new EmailSettings($SETTINGS);
+            $emailService = new EmailService();
+            $emailService->sendMail(
                 'TEAMPASS - ' . $lang->get('temporary_encryption_code'),
                 str_replace(
                     array('#enc_code#'),
@@ -2769,7 +2886,7 @@ if (null !== $post_type) {
                     $lang->get('email_body_user_added_from_ldap_encryption_code')
                 ),
                 $userInfo['email'],
-                $SETTINGS
+                $emailSettings
             );
 
 
@@ -2783,7 +2900,7 @@ if (null !== $post_type) {
 
             break;
 
-            /*
+        /*
          * CHANGE USER AUTHENTICATION TYPE
          */
         case 'change_user_auth_type':
@@ -2799,19 +2916,12 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
-
             // Prepare variables
-            $post_id = filter_var($dataReceived['id'], FILTER_SANITIZE_NUMBER_INT);
+            $post_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
             $post_auth = filter_var($dataReceived['auth_type'], FILTER_SANITIZE_FULL_SPECIAL_CHARS);
 
-
             // Empty user
-            if (empty($post_id) === true || empty($post_id) === true) {
+            if (empty($post_id) === true) {
                 echo prepareExchangedData(
                     array(
                         'error' => true,
@@ -2875,12 +2985,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
 
             // Prepare variables
             $post_userid = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
@@ -3006,11 +3110,20 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
+            // Is this user allowed to do this?
+            if (
+                (int) $session->get('user-admin') !== 1
+                && (int) $session->get('user-can_manage_all_users') !== 1
+            ) {
+                echo prepareExchangedData(
+                    array(
+                        'error' => true,
+                        'message' => $lang->get('error_not_allowed_to'),
+                    ),
+                    'encode'
+                );
+                break;
+            }
 
             // Prepare variables
             $post_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
@@ -3089,12 +3202,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
 
             // Prepare variables
             $post_user_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
@@ -3263,12 +3370,6 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
-
             // Prepare variables
             $user_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
 
@@ -3341,12 +3442,6 @@ if (null !== $post_type) {
                 );
                 break;
             }
-
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
 
             if (isset($dataReceived['user_id']) === false) {
                 // Exit nothing to be done
@@ -3422,15 +3517,14 @@ if (null !== $post_type) {
                 break;
             }
 
-            // decrypt and retrieve data in JSON format
-            $dataReceived = prepareExchangedData(
-                $post_data,
-                'decode'
-            );
             // Prepare variables
             $user_id = filter_var($dataReceived['user_id'], FILTER_SANITIZE_NUMBER_INT);
 
-            $userInfos = getFullUserInfos((int) $user_id);
+            $fullUserInfos = getFullUserInfos((int) $user_id);
+
+            // Filter only on useful fields
+            $userInfos['id'] = $fullUserInfos['id'];
+            $userInfos['ongoing_process_id'] = $fullUserInfos['ongoing_process_id'];
 
             echo prepareExchangedData(
                 array(
@@ -3469,10 +3563,11 @@ if (null !== $post_type) {
             $value[0] = 'user_language';
             $post_newValue = strtolower($post_newValue);
         }
+        
         // Check that operation is allowed
         if (in_array(
             $value[0],
-            array('login', 'pw', 'email', 'treeloadstrategy', 'usertimezone', 'yubico_user_key', 'yubico_user_id', 'agses-usercardid', 'user_language', 'psk')
+            array('login', 'pw', 'email', 'treeloadstrategy', 'usertimezone', 'yubico_user_key', 'yubico_user_id', 'agses-usercardid', 'user_language', 'psk', 'split_view_mode')
         )) {
             DB::update(
                 prefixTable('users'),
@@ -3491,22 +3586,25 @@ if (null !== $post_type) {
                 $session->get('user-login'),
                 filter_input(INPUT_POST, 'id', FILTER_SANITIZE_FULL_SPECIAL_CHARS)
             );
+
             // refresh SESSION if requested
-            if ($value[0] === 'treeloadstrategy') {
-                $session->set('user-tree_load_strategy', $post_newValue);
-            } elseif ($value[0] === 'usertimezone') {
-                // special case for usertimezone where session needs to be updated
-                $session->set('user-timezone', $post_newValue);
-            } elseif ($value[0] === 'userlanguage') {
-                // special case for user_language where session needs to be updated
-                $session->set('user-language', $post_newValue);
-            } elseif ($value[0] === 'agses-usercardid') {
-                // special case for agsescardid where session needs to be updated
-                //$_SESSION['user_agsescardid'] = $post_newValue;
-            } elseif ($value[0] === 'email') {
-                // store email change in session
-                $session->set('user-email', $post_newValue);
+            // Session keys mapping
+            $sessionMapping = [
+                'treeloadstrategy' => 'user-tree_load_strategy',
+                'usertimezone' => 'user-timezone',
+                'userlanguage' => 'user-language',
+                'agses-usercardid' => null, 
+                'email' => 'user-email',
+                'split_view_mode' => 'user-split_view_mode',
+            ];
+            // Update session
+            if (array_key_exists($value[0], $sessionMapping)) {
+                $sessionKey = $sessionMapping[$value[0]];
+                if ($sessionKey !== null) {
+                    $session->set($sessionKey, $post_newValue);
+                }
             }
+            
             // Display info
             echo htmlentities($post_newValue, ENT_QUOTES);
         }

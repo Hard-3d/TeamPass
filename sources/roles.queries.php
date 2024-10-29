@@ -49,7 +49,7 @@ $session = SessionManager::getSession();
 $request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -222,15 +222,17 @@ if (null !== $post_type) {
                     $post_roleId
                 );
 
-                //Store in DB
-                DB::insert(
-                    prefixTable('roles_values'),
-                    array(
-                        'folder_id' => $folderId,
-                        'role_id' => $post_roleId,
-                        'type' => $post_access,
-                    )
-                );
+                //Store in DB if "access" is not empty (no access to folder)
+                if (!empty($post_access)) {
+                    DB::insert(
+                        prefixTable('roles_values'),
+                        array(
+                            'folder_id' => $folderId,
+                            'role_id' => $post_roleId,
+                            'type' => $post_access,
+                        )
+                    );
+                }
 
                 // Manage descendants
                 if ((int) $post_propagate === 1) {
@@ -244,15 +246,17 @@ if (null !== $post_type) {
                             $post_roleId
                         );
 
-                        //Store in DB
-                        DB::insert(
-                            prefixTable('roles_values'),
-                            array(
-                                'folder_id' => $node->id,
-                                'role_id' => $post_roleId,
-                                'type' => $post_access,
-                            )
-                        );
+                        //Store in DB if "access" is not empty (no access to folder)        
+                        if (!empty($post_access)) {
+                            DB::insert(
+                                prefixTable('roles_values'),
+                                array(
+                                    'folder_id' => $node->id,
+                                    'role_id' => $post_roleId,
+                                    'type' => $post_access,
+                                )
+                            );
+                        }
                     }
                 }
             }
@@ -743,7 +747,7 @@ if (null !== $post_type) {
                         'SELECT a.increment_id as increment_id, a.role_id as role_id, r.title as title
                         FROM '.prefixTable('ldap_groups_roles').' AS a
                         INNER JOIN '.prefixTable('roles_title').' AS r ON r.id = a.role_id
-                        WHERE a.ldap_group_id = %i',
+                        WHERE a.ldap_group_id = %s',
                         $key
                     );
                     $counter = DB::count();

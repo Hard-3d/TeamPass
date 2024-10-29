@@ -36,6 +36,9 @@ use Hackzilla\PasswordGenerator\Generator\ComputerPasswordGenerator;
 use Hackzilla\PasswordGenerator\RandomGenerator\Php7RandomGenerator;
 use TeampassClasses\SuperGlobal\SuperGlobal;
 use TeampassClasses\Language\Language;
+use TeampassClasses\PasswordManager\PasswordManager;
+use TeampassClasses\ConfigManager\ConfigManager;
+use Encryption\Crypt\aesctr;
 
 // Do initial test
 if (file_exists('../includes/config/settings.php') === false) {
@@ -45,7 +48,7 @@ if (file_exists('../includes/config/settings.php') === false) {
         echo '[{"error" : "File <i>' . $settings . '</i> could not be copied from <i>'.$settings_sample.'</i>. You have 2 possible actions:<br>'.
             '1- Manually perform a copy of file <i>' . $settings_sample . '</i> and rename it as <i>'.$settings.'</i>.<br>'.
             'or 2- Change the user rights to 0755 on <i>includes/config/</i> and its content.<br>'.
-            'Then click START button.", "index" : "99", "multiple" : "' . $post_multiple . '"}]';
+            'Then click START button.", "index" : "99", "multiple" : "' . $inputData['multiple'] . '"}]';
         exit();
     }
 }
@@ -61,12 +64,9 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-// Load config if $SETTINGS not defined
-try {
-    include_once __DIR__.'/../includes/config/tp.config.php';
-} catch (Exception $e) {
-    $SETTINGS = [];
-}
+// Load config
+$configManager = new ConfigManager();
+$SETTINGS = $configManager->getAllSettings();
 
 // Define Timezone
 date_default_timezone_set(isset($SETTINGS['timezone']) === true ? $SETTINGS['timezone'] : 'UTC');
@@ -134,14 +134,6 @@ function encryptFollowingDefuse($message, $ascii_key)
     );
 }
 
-// Prepare POST variables
-$post_type = filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-$post_data = filter_input(INPUT_POST, 'data', FILTER_SANITIZE_FULL_SPECIAL_CHARS, FILTER_FLAG_NO_ENCODE_QUOTES);
-$post_activity = filter_input(INPUT_POST, 'activity', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-$post_task = filter_input(INPUT_POST, 'task', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-$post_index = filter_input(INPUT_POST, 'index', FILTER_SANITIZE_NUMBER_INT);
-$post_multiple = filter_input(INPUT_POST, 'multiple', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-$post_db = filter_input(INPUT_POST, 'db', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
 
 // Prepare SESSION variables
 $session_url_path = $superGlobal->get('url_path', 'SESSION');
@@ -150,70 +142,103 @@ $session_db_encoding = $superGlobal->get('db_encoding', 'SESSION');
 if (empty($session_db_encoding) === true) {
     $session_db_encoding = 'utf8';
 }
-
 $superGlobal->put('CPM', 1, 'SESSION');
 
-if (null !== $post_type) {
-    switch ($post_type) {
-        case 'step_2':
-            //decrypt
-            require_once 'libs/aesctr.php'; // AES Counter Mode implementation
-            $json = Encryption\Crypt\aesctr::decrypt($post_data, 'cpm', 128);
-            $data = json_decode($json, true);
-            $json = Encryption\Crypt\aesctr::decrypt($post_activity, 'cpm', 128);
-            $data = array_merge($data, array('activity' => $json));
-            $json = Encryption\Crypt\aesctr::decrypt($post_task, 'cpm', 128);
-            $data = array_merge($data, array('task' => $json));
+// Prepare POST variables
+$postValues = [
+    'type' => filter_input(INPUT_POST, 'type', FILTER_SANITIZE_FULL_SPECIAL_CHARS),
+    'data' => filter_input(INPUT_POST, 'data', FILTER_SANITIZE_FULL_SPECIAL_CHARS, FILTER_FLAG_NO_ENCODE_QUOTES),
+    'activity' => filter_input(INPUT_POST, 'activity', FILTER_SANITIZE_FULL_SPECIAL_CHARS),
+    'task' => filter_input(INPUT_POST, 'task', FILTER_SANITIZE_FULL_SPECIAL_CHARS),
+    'index' => filter_input(INPUT_POST, 'index', FILTER_SANITIZE_NUMBER_INT),
+    'multiple' => filter_input(INPUT_POST, 'multiple', FILTER_SANITIZE_FULL_SPECIAL_CHARS),
+    'db' => filter_input(INPUT_POST, 'db', FILTER_SANITIZE_FULL_SPECIAL_CHARS),
+];
 
-            $abspath = str_replace('\\', '/', $data['absolute_path']);
+// Decrypt POST values
+require_once 'libs/aesctr.php';
+foreach ($postValues as $key => $value) {
+    if ($key === 'data' || $key === 'activity' || $key === 'task' || $key === 'db') {
+        $postValues[$key] = aesctr::decrypt($value, 'cpm', 128);
+    }
+}
+
+$inputData['data'] = [
+    'type' => isset($postValues['type']) === true ? $postValues['type'] : '',
+    'data' => isset($postValues['data']) === true ? $postValues['data'] : '',
+    'activity' => isset($postValues['activity']) === true ? $postValues['activity'] : '',
+    'task' => isset($postValues['task']) === true ? $postValues['task'] : '',
+    'index' => isset($postValues['index']) === true ? (int) $postValues['index'] : 0,
+    'multiple' => isset($postValues['multiple']) === true ? $postValues['multiple'] : '',
+    'db' => isset($postValues['db']) === true ? $postValues['db'] : '',
+];
+$filters = [
+    'type' => 'trim|escape',
+    'data' => 'cast:array',
+    'activity' => 'trim|escape',
+    'task' => 'trim|escape',
+    'index' => 'cast:integer',
+    'multiple' => 'trim|escape',
+    'db' => 'cast:array',
+];
+$inputData = dataSanitizer(
+    $inputData['data'],
+    $filters,
+    $session_abspath
+);
+
+if (null !== $inputData['type']) {
+    switch ($inputData['type']) {
+        case 'step_2':
+            $abspath = str_replace('\\', '/', $inputData['data']['absolute_path']);
             if (substr($abspath, strlen($abspath) - 1) == '/') {
                 $abspath = substr($abspath, 0, strlen($abspath) - 1);
             }
             $session_abspath = $abspath;
-            $session_url_path = $data['url_path'];
+            $session_url_path = $inputData['data']['url_path'];
 
-            if (isset($data['activity']) && $data['activity'] === 'folder') {
-                $targetPath = $abspath . '/' . $data['task'] . '/';
+            if (isset($inputData['activity']) && $inputData['activity'] === 'folder') {
+                $targetPath = $abspath . '/' . $inputData['task'] . '/';
                 if (is_writable($targetPath) === true) {
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 } else {
-                    echo '[{"error" : " Path ' . $targetPath . ' is not writable!", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : " Path ' . $targetPath . ' is not writable!", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 }
                 break;
             }
 
-            if (isset($data['activity']) && $data['activity'] === 'extension') {
-                if (extension_loaded($data['task'])) {
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+            if (isset($inputData['activity']) && $inputData['activity'] === 'extension') {
+                if (extension_loaded($inputData['task'])) {
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 } else {
-                    echo '[{"error" : " Extension ' . $data['task'] . ' is not loaded!", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : " Extension ' . $inputData['task'] . ' is not loaded!", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 }
                 break;
             }
 
-            if (isset($data['activity']) && $data['activity'] === 'function') {
-                if (function_exists($data['task'])) {
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+            if (isset($inputData['activity']) && $inputData['activity'] === 'function') {
+                if (function_exists($inputData['task'])) {
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 } else {
-                    echo '[{"error" : " Function ' . $data['task'] . ' is not available!", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : " Function ' . $inputData['task'] . ' is not available!", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 }
                 break;
             }
 
-            if (isset($data['activity']) && $data['activity'] === 'version') {
+            if (isset($inputData['activity']) && $inputData['activity'] === 'version') {
                 if (version_compare(phpversion(), MIN_PHP_VERSION, '>=')) {
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 } else {
-                    echo '[{"error" : "PHP version ' . phpversion() . ' is not OK (minimum is '.MIN_PHP_VERSION.')", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : "PHP version ' . phpversion() . ' is not OK (minimum is '.MIN_PHP_VERSION.')", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 }
                 break;
             }
 
-            if (isset($data['activity']) && $data['activity'] === 'ini') {
-                if (ini_get($data['task']) >= 30) {
-                    echo '[{"error" : "", "index" : "' . $post_index . '"}]';
+            if (isset($inputData['activity']) && $inputData['activity'] === 'ini') {
+                if (ini_get($inputData['task']) >= 30) {
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '"}]';
                 } else {
-                    echo '[{"error" : "PHP \"Maximum execution time\" is set to ' . ini_get('max_execution_time') . ' seconds. Please try to set to 30s at least during installation.", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : "PHP \"Maximum execution time\" is set to ' . ini_get('max_execution_time') . ' seconds. Please try to set to 30s at least during installation.", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 }
                 break;
             }
@@ -221,27 +246,25 @@ if (null !== $post_type) {
             break;
 
         case 'step_3':
-            //decrypt
-            require_once 'libs/aesctr.php'; // AES Counter Mode implementation
-            $json = Encryption\Crypt\aesctr::decrypt($post_data, 'cpm', 128);
-            $data = json_decode($json, true);
-            $json = Encryption\Crypt\aesctr::decrypt($post_db, 'cpm', 128);
-            $db = json_decode($json, true);
-
-            $post_abspath = str_replace('\\', '/', $data['absolute_path']);
+            $post_abspath = str_replace('\\', '/', $inputData['data']['absolute_path']);
             if (substr($abspath, strlen($post_abspath) - 1) == '/') {
                 $post_abspath = substr($post_abspath, 0, strlen($post_abspath) - 1);
             }
-            $post_urlpath = $data['url_path'];
-
+            
             // launch
             try {
-                $dbTmp = mysqli_connect($db['db_host'], $db['db_login'], $db['db_pw'], $db['db_bdd'], $db['db_port']);
+                $dbTmp = mysqli_connect(
+                    $inputData['db']['db_host'], 
+                    $inputData['db']['db_login'], 
+                    $inputData['db']['db_pw'], 
+                    $inputData['db']['db_bdd'], 
+                    $inputData['db']['db_port']
+                );
             } catch (Exception $e) {
                 echo '[{"error" : "Cannot connect to Database - '.$e->getMessage().'"}]';
                 break;
-            } 
-
+            }
+            
             if ($dbTmp) {
                 // create temporary INSTALL mysqli table
                 $mysqli_result = mysqli_query(
@@ -252,30 +275,36 @@ if (null !== $post_type) {
                     PRIMARY KEY (`key`)
                     ) CHARSET=utf8;'
                 );
-                //print_r($data);
+                
                 // store values
-                foreach ($data as $key => $value) {
+                foreach ($inputData['data'] as $key => $value) {
+                    // Escape values to prevent SQL injections
+                    $escapedKey = mysqli_real_escape_string($dbTmp, $key);
+                    $escapedValue = mysqli_real_escape_string($dbTmp, $value);
+
                     $superGlobal->put($key, $value, 'SESSION');
-                    $tmp = mysqli_num_rows(mysqli_query($dbTmp, "SELECT * FROM `_install` WHERE `key` = '" . $key . "'"));
+                    $tmp = mysqli_num_rows(mysqli_query($dbTmp, "SELECT * FROM `_install` WHERE `key` = '" . $escapedKey . "'"));
                     if (intval($tmp) === 0) {
-                        mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('" . $key . "', '" . $value . "');");
+                        mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('" . $escapedKey . "', '" . $escapedValue . "');");
                     } else {
-                        mysqli_query($dbTmp, "UPDATE `_install` SET `value` = '" . $value . "' WHERE `key` = '" . $key . "';");
+                        mysqli_query($dbTmp, "UPDATE `_install` SET `value` = '" . $escapedValue . "' WHERE `key` = '" . $escapedKey . "';");
                     }
                 }
+
+                // For other queries with `url_path` and `absolute_path`
+                $escapedUrlPath = mysqli_real_escape_string($dbTmp, empty($post_urlpath) ? $inputData['db']['url_path'] : $post_urlpath);
+                $escapedAbsPath = mysqli_real_escape_string($dbTmp, empty($post_abspath) ? $inputData['data']['absolute_path'] : $post_abspath);
+
                 $tmp = mysqli_num_rows(mysqli_query($dbTmp, "SELECT * FROM `_install` WHERE `key` = 'url_path'"));
                 if (intval($tmp) === 0) {
-                    mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('url_path', '" . empty($post_urlpath) ? $db['url_path'] : $post_urlpath . "');");
-                }/* else {
-                    mysqli_query($dbTmp, "UPDATE `_install` SET `value` = '". empty($session_url_path) ? $data['url_path'] : $session_url_path. "' WHERE `key` = 'url_path';");
-                }*/
+                    mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('url_path', '" . $escapedUrlPath . "');");
+                }
+
                 $tmp = mysqli_num_rows(mysqli_query($dbTmp, "SELECT * FROM `_install` WHERE `key` = 'absolute_path'"));
                 if (intval($tmp) === 0) {
-                    mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('absolute_path', '" . empty($post_abspath) ? $data['absolute_path'] : $post_abspath . "');");
-                }/* else {
-                    mysqli_query($dbTmp, "UPDATE `_install` SET `value` = '" . empty($session_abspath) ? $data['absolute_path'] : $session_abspath . "' WHERE `key` = 'absolute_path';");
-                }*/
-
+                    mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('absolute_path', '" . $escapedAbsPath . "');");
+                }
+                
                 echo '[{"error" : "", "result" : "Connection is successful", "multiple" : ""}]';
             } else {
                 echo '[{"error" : "' . addslashes(str_replace(array("'", "\n", "\r"), array('"', '', ''), mysqli_connect_error())) . '", "result" : "Failed", "multiple" : ""}]';
@@ -284,39 +313,45 @@ if (null !== $post_type) {
             break;
 
         case 'step_4':
-            //decrypt
-            require_once 'libs/aesctr.php'; // AES Counter Mode implementation
-            $json = Encryption\Crypt\aesctr::decrypt($post_data, 'cpm', 128);
-            $data = json_decode($json, true);
-            $json = Encryption\Crypt\aesctr::decrypt($post_db, 'cpm', 128);
-            $db = json_decode($json, true);
-
-            $dbTmp = mysqli_connect($db['db_host'], $db['db_login'], $db['db_pw'], $db['db_bdd'], $db['db_port']);
+            $dbTmp = mysqli_connect(
+                $inputData['db']['db_host'], 
+                $inputData['db']['db_login'], 
+                $inputData['db']['db_pw'], 
+                $inputData['db']['db_bdd'], 
+                $inputData['db']['db_port']
+            );
 
             // prepare data
-            foreach ($data as $key => $value) {
-                $data[$key] = str_replace(array('&quot;', '&#92;'), array('""', '\\\\'), $value);
+            foreach ($inputData['data'] as $key => $value) {
+                $escapedKey = mysqli_real_escape_string($dbTmp, $key);
+                $escapedValue = mysqli_real_escape_string($dbTmp, str_replace(array('&quot;', '&#92;'), array('""', '\\\\'), $value));
+                $inputData['data'][$escapedKey] = $escapedValue;
             }
 
             // check skpath
-            if (empty($data['sk_path'])) {
-                $data['sk_path'] = $session_abspath . '/includes';
+            if (empty($inputData['data']['sk_path'])) {
+                $inputData['data']['sk_path'] = $session_abspath . '/includes';
             } else {
-                $data['sk_path'] = str_replace('&#92;', '/', $data['sk_path']);
+                $inputData['data']['sk_path'] = str_replace('&#92;', '/', $inputData['data']['sk_path']);
             }
-            if (substr($data['sk_path'], strlen($data['sk_path']) - 1) == '/' || substr($data['sk_path'], strlen($data['sk_path']) - 1) == '"') {
-                $data['sk_path'] = substr($data['sk_path'], 0, strlen($data['sk_path']) - 1);
+            if (substr($inputData['data']['sk_path'], strlen($inputData['data']['sk_path']) - 1) == '/' || substr($inputData['data']['sk_path'], strlen($inputData['data']['sk_path']) - 1) == '"') {
+                $inputData['data']['sk_path'] = substr($inputData['data']['sk_path'], 0, strlen($inputData['data']['sk_path']) - 1);
             }
-            if (is_dir($data['sk_path'])) {
-                if (is_writable($data['sk_path'])) {
+            if (is_dir($inputData['data']['sk_path'])) {
+                if (is_writable($inputData['data']['sk_path'])) {
                     // store all variables in SESSION
-                    foreach ($data as $key => $value) {
+                    foreach ($inputData['data'] as $key => $value) {
                         $superGlobal->put($key, $value, 'SESSION');
-                        $tmp = mysqli_num_rows(mysqli_query($dbTmp, "SELECT * FROM `_install` WHERE `key` = '" . $key . "'"));
+                
+                        // Use mysqli_real_escape_string to escape keys and values
+                        $escapedKey = mysqli_real_escape_string($dbTmp, $key);
+                        $escapedValue = mysqli_real_escape_string($dbTmp, $value);
+
+                        $tmp = mysqli_num_rows(mysqli_query($dbTmp, "SELECT * FROM `_install` WHERE `key` = '" . $escapedKey . "'"));
                         if (intval($tmp) === 0) {
-                            mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('" . $key . "', '" . $value . "');");
+                            mysqli_query($dbTmp, "INSERT INTO `_install` (`key`, `value`) VALUES ('" . $escapedKey . "', '" . $escapedValue . "');");
                         } else {
-                            mysqli_query($dbTmp, "UPDATE `_install` SET `value` = '" . $value . "' WHERE `key` = '" . $key . "';");
+                            mysqli_query($dbTmp, "UPDATE `_install` SET `value` = '" . $escapedValue . "' WHERE `key` = '" . $escapedKey . "';");
                         }
                     }
                     echo '[{"error" : "", "result" : "Information stored", "multiple" : ""}]';
@@ -324,22 +359,21 @@ if (null !== $post_type) {
                     echo '[{"error" : "The Directory must be writable!", "result" : "Information stored", "multiple" : ""}]';
                 }
             } else {
-                echo '[{"error" : "' . $data['sk_path'] . ' is not a Directory!", "result" : "Information stored", "multiple" : ""}]';
+                echo '[{"error" : "' . $inputData['data']['sk_path'] . ' is not a Directory!", "result" : "Information stored", "multiple" : ""}]';
             }
             mysqli_close($dbTmp);
             break;
 
         case 'step_5':
-            //decrypt
-            require_once 'libs/aesctr.php'; // AES Counter Mode implementation
-            $activity = Encryption\Crypt\aesctr::decrypt($post_activity, 'cpm', 128);
-            $task = Encryption\Crypt\aesctr::decrypt($post_task, 'cpm', 128);
-            $json = Encryption\Crypt\aesctr::decrypt($post_db, 'cpm', 128);
-            $db = json_decode($json, true);
-
             // launch
-            $dbTmp = mysqli_connect($db['db_host'], $db['db_login'], $db['db_pw'], $db['db_bdd'], $db['db_port']);
-            $dbBdd = $db['db_bdd'];
+            $dbTmp = mysqli_connect(
+                $inputData['db']['db_host'], 
+                $inputData['db']['db_login'], 
+                $inputData['db']['db_pw'], 
+                $inputData['db']['db_bdd'], 
+                $inputData['db']['db_port']
+            );
+            $dbBdd = $inputData['db']['db_bdd'];
             if ($dbTmp) {
                 $mysqli_result = '';
 
@@ -348,12 +382,12 @@ if (null !== $post_type) {
                 while ($row = $result->fetch_array()) {
                     $var[$row[0]] = $row[1];
                 }
-
-                if ($activity === 'table') {
-                    if ($task === 'utf8') {
+                
+                if ($inputData['activity'] === 'table') {
+                    if ($inputData['task'] === 'utf8') {
                         //FORCE UTF8 DATABASE
                         mysqli_query($dbTmp, 'ALTER DATABASE `' . $dbBdd . '` DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci');
-                    } elseif ($task === 'defuse_passwords') {
+                    } elseif ($inputData['task'] === 'defuse_passwords') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'defuse_passwords` (
@@ -364,7 +398,7 @@ if (null !== $post_type) {
 								PRIMARY KEY (`increment_id`)
 							) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'notification') {
+                    } elseif ($inputData['task'] === 'notification') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'notification` (
@@ -374,7 +408,7 @@ if (null !== $post_type) {
 								PRIMARY KEY (`increment_id`)
 							) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'sharekeys_items') {
+                    } elseif ($inputData['task'] === 'sharekeys_items') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'sharekeys_items` (
@@ -382,7 +416,8 @@ if (null !== $post_type) {
 								`object_id` int(12) NOT NULL,
 								`user_id` int(12) NOT NULL,
 								`share_key` text NOT NULL,
-								PRIMARY KEY (`increment_id`)
+								PRIMARY KEY (`increment_id`),
+                                INDEX idx_object_user (`object_id`, `user_id`)
 							) CHARSET=utf8;'
                         );
                         $mysqli_result = mysqli_query(
@@ -391,7 +426,7 @@ if (null !== $post_type) {
                                 ADD KEY `object_id_idx` (`object_id`),
                                 ADD KEY `user_id_idx` (`user_id`);'
                         );
-                    } elseif ($task === 'sharekeys_logs') {
+                    } elseif ($inputData['task'] === 'sharekeys_logs') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'sharekeys_logs` (
@@ -408,7 +443,7 @@ if (null !== $post_type) {
                                 ADD KEY `object_id_idx` (`object_id`),
                                 ADD KEY `user_id_idx` (`user_id`);'
                         );
-                    } elseif ($task === 'sharekeys_fields') {
+                    } elseif ($inputData['task'] === 'sharekeys_fields') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'sharekeys_fields` (
@@ -419,7 +454,7 @@ if (null !== $post_type) {
 								PRIMARY KEY (`increment_id`)
 							) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'sharekeys_suggestions') {
+                    } elseif ($inputData['task'] === 'sharekeys_suggestions') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'sharekeys_suggestions` (
@@ -430,7 +465,7 @@ if (null !== $post_type) {
 								PRIMARY KEY (`increment_id`)
 							) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'sharekeys_files') {
+                    } elseif ($inputData['task'] === 'sharekeys_files') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'sharekeys_files` (
@@ -441,7 +476,7 @@ if (null !== $post_type) {
 								PRIMARY KEY (`increment_id`)
 							) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'items') {
+                    } elseif ($inputData['task'] === 'items') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "items` (
@@ -471,10 +506,11 @@ if (null !== $post_type) {
                             `updated_at` varchar(30) NULL,
                             `deleted_at` varchar(30) NULL,
                             PRIMARY KEY (`id`),
-                            KEY `restricted_inactif_idx` (`restricted_to`,`inactif`)
+                            KEY `restricted_inactif_idx` (`restricted_to`,`inactif`),
+                            INDEX items_perso_id_idx (`perso`, `id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'log_items') {
+                    } elseif ($inputData['task'] === 'log_items') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "log_items` (
@@ -486,7 +522,8 @@ if (null !== $post_type) {
                             `raison` text NULL,
                             `old_value` MEDIUMTEXT NULL DEFAULT NULL,
                             `encryption_type` VARCHAR(20) NOT NULL DEFAULT 'not_set',
-                            PRIMARY KEY (`increment_id`)
+                            PRIMARY KEY (`increment_id`),
+                            INDEX log_items_item_action_user_idx (`id_item`, `action`, `id_user`)
                             ) CHARSET=utf8;"
                         );
                         // create index
@@ -494,37 +531,23 @@ if (null !== $post_type) {
                             $dbTmp,
                             'CREATE INDEX teampass_log_items_id_item_IDX ON ' . $var['tbl_prefix'] . 'log_items (id_item,date);'
                         );
-                    } elseif ($task === 'misc') {
+                    } elseif ($inputData['task'] === 'misc') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
-                            'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'misc` (
+                            "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "misc` (
                             `increment_id` int(12) NOT null AUTO_INCREMENT,
                             `type` varchar(50) NOT NULL,
                             `intitule` varchar(100) NOT NULL,
                             `valeur` varchar(500) NOT NULL,
                             `created_at` varchar(255) NULL DEFAULT NULL,
                             `updated_at` varchar(255) NULL DEFAULT NULL,
+                            `is_encrypted` tinyint(1) NOT NULL DEFAULT '0',
                             PRIMARY KEY (`increment_id`)
-                            ) CHARSET=utf8;'
+                            ) CHARSET=utf8;"
                         );
 
                         // include constants
                         require_once '../includes/config/include.php';
-
-                        // prepare config file
-                        $tp_config_file = '../includes/config/tp.config.php';
-                        if (file_exists($tp_config_file)) {
-                            if (!copy($tp_config_file, $tp_config_file . '.' . date('Y_m_d', mktime(0, 0, 0, (int) date('m'), (int) date('d'), (int) date('y'))))) {
-                                echo '[{"error" : "includes/config/tp.config.php file already exists and cannot be renamed. Please do it by yourself and click on button Launch.", "result":"", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
-                                break;
-                            } else {
-                                unlink($tp_config_file);
-                            }
-                        }
-                        $file_handler = fopen($tp_config_file, 'w');
-                        $config_text = '<?php
-global $SETTINGS;
-$SETTINGS = array (';
 
                         // add by default settings
                         $aMiscVal = array(
@@ -590,8 +613,8 @@ $SETTINGS = array (';
                             array('admin', 'personal_saltkey_cookie_duration', '31'),
                             array('admin', 'email_smtp_server', ''),
                             array('admin', 'email_smtp_auth', ''),
-                            array('admin', 'email_auth_username', ''),
-                            array('admin', 'email_auth_pwd', ''),
+                            array('admin', 'email_auth_username', '', '1'),
+                            array('admin', 'email_auth_pwd', '', '1'),
                             array('admin', 'email_port', ''),
                             array('admin', 'email_security', ''),
                             array('admin', 'email_server_url', ''),
@@ -623,7 +646,7 @@ $SETTINGS = array (';
                             array('admin', 'duo', '0'),
                             array('admin', 'enable_server_password_change', '0'),
                             array('admin', 'bck_script_path', $var['absolute_path'] . '/backups'),
-                            array('admin', 'bck_script_filename', 'bck_teampass'),
+                            array('admin', 'bck_script_filename', 'bck_teampass', '1'),
                             array('admin', 'syslog_enable', '0'),
                             array('admin', 'syslog_host', 'localhost'),
                             array('admin', 'syslog_port', '514'),
@@ -646,13 +669,13 @@ $SETTINGS = array (';
                             array('admin', 'secure_display_image', '1'),
                             array('admin', 'upload_zero_byte_file', '0'),
                             array('admin', 'upload_all_extensions_file', '0'),
-                            array('admin', 'bck_script_passkey', generateRandomKey()),
+                            array('admin', 'bck_script_passkey', '', '1'),
                             array('admin', 'admin_2fa_required', '1'),
                             array('admin', 'password_overview_delay', '4'),
                             array('admin', 'copy_to_clipboard_small_icons', '1'),
-                            array('admin', 'duo_ikey', ''),
-                            array('admin', 'duo_skey', ''),
-                            array('admin', 'duo_host', ''),
+                            array('admin', 'duo_ikey', '', '1'),
+                            array('admin', 'duo_skey', '', '1'),
+                            array('admin', 'duo_host', '', '1'),
                             array('admin', 'duo_failmode', 'secure'),
                             array('admin', 'roles_allowed_to_print_select', ''),
                             array('admin', 'clipboard_life_duration', '30'),
@@ -668,9 +691,9 @@ $SETTINGS = array (';
                             array('admin', 'ldap_user_dn_attribute', ''),
                             array('admin', 'ldap_dn_additional_user_dn', ''),
                             array('admin', 'ldap_user_object_filter', ''),
-                            array('admin', 'ldap_bdn', ''),
-                            array('admin', 'ldap_hosts', ''),
-                            array('admin', 'ldap_password', ''),
+                            array('admin', 'ldap_bdn', '', '1'),
+                            array('admin', 'ldap_hosts', '', '1'),
+                            array('admin', 'ldap_password', '', '1'),
                             array('admin', 'ldap_username', ''),
                             array('admin', 'api_token_duration', '60'),
                             array('timestamp', 'last_folder_change', ''),
@@ -678,6 +701,7 @@ $SETTINGS = array (';
                             array('admin', 'task_maximum_run_time', '300'),
                             array('admin', 'tasks_manager_refreshing_period', '20'),
                             array('admin', 'maximum_number_of_items_to_treat', '100'),
+                            array('admin', 'number_users_build_cache_tree', '10'),
                             array('admin', 'ldap_tls_certifacte_check', 'LDAP_OPT_X_TLS_NEVER'),
                             array('admin', 'enable_tasks_log', '0'),
                             array('admin', 'upgrade_timestamp', time()),
@@ -699,12 +723,18 @@ $SETTINGS = array (';
                             array('admin', 'pwd_default_length', '14'),
                             array('admin', 'tasks_log_retention_delay', '30'),
                             array('admin', 'oauth2_enabled', '0'),
-                            array('admin', 'oauth2_client_id', ''),
-                            array('admin', 'oauth2_client_secret', ''),
+                            array('admin', 'oauth2_client_id', '', '1'),
+                            array('admin', 'oauth2_client_secret', '', '1'),
                             array('admin', 'oauth2_client_endpoint', ''),
-                            array('admin', 'oauth2_client_token', ''),
-                            array('admin', 'oauth2_client_scopes', 'openid,profile,email'),
+                            array('admin', 'oauth2_client_urlResourceOwnerDetails', ''),
+                            array('admin', 'oauth2_client_token', '', '1'),
+                            array('admin', 'oauth2_client_scopes', 'openid,profile,email,User.Read,Group.Read.All'),
                             array('admin', 'oauth2_client_appname', 'Login with Azure'),
+                            array('admin', 'show_item_data', '0'),
+                            array('admin', 'oauth2_tenant_id', '', '1'),
+                            array('admin', 'limited_search_default', '0'),
+                            array('admin', 'highlight_selected', '0'),
+                            array('admin', 'highlight_favorites', '0'),
                         );
                         foreach ($aMiscVal as $elem) {
                             //Check if exists before inserting
@@ -716,32 +746,19 @@ $SETTINGS = array (';
                                 )
                             );
                             if (intval($tmp) === 0) {
+                                $value = isset($elem[3]) ? $elem[3] : 0;
                                 $queryRes = mysqli_query(
                                     $dbTmp,
                                     "INSERT INTO `" . $var['tbl_prefix'] . "misc`
-                                    (`type`, `intitule`, `valeur`) VALUES
+                                    (`type`, `intitule`, `valeur`, `created_at`, `is_encrypted`) VALUES
                                     ('" . $elem[0] . "', '" . $elem[1] . "', '" .
-                                        str_replace("'", '', $elem[2]) . "');"
-                                ); // or die(mysqli_error($dbTmp))
+                                        str_replace("'", '', $elem[2]) . "', '" . $elem[1] . "', '" . $value . "');"
+                                );
                             }
-
-                            // append new setting in config file
-                            $config_text .= "
-    '" . $elem[1] . "' => '" . str_replace("'", '', $elem[2]) . "',";
                         }
 
-                        // write to config file
-                        $result = fwrite(
-                            $file_handler,
-                            utf8_encode(
-                                $config_text . '
-);'
-                            )
-                        );
-                        fclose($file_handler);
-
                         // --
-                    } elseif ($task === 'nested_tree') {
+                    } elseif ($inputData['task'] === 'nested_tree') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "nested_tree` (
@@ -769,7 +786,7 @@ $SETTINGS = array (';
                             KEY `personal_folder_idx` (`personal_folder`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'rights') {
+                    } elseif ($inputData['task'] === 'rights') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "rights` (
@@ -780,7 +797,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'users') {
+                    } elseif ($inputData['task'] === 'users') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "users` (
@@ -840,21 +857,27 @@ $SETTINGS = array (';
                             `deleted_at` varchar(30) NULL DEFAULT NULL,
                             `keys_recovery_time` VARCHAR(500) NULL DEFAULT NULL,
                             `aes_iv` TEXT NULL DEFAULT NULL,
+                            `split_view_mode` tinyint(1) NOT null DEFAULT '0',
                             PRIMARY KEY (`id`),
                             UNIQUE KEY `login` (`login`)
                             ) CHARSET=utf8;"
                         );
 
                         require_once '../includes/config/include.php';
+
+                        // Hash password
+                        $passwordManager = new PasswordManager();
+                        $hashedPassword = $passwordManager->hashPassword($var['admin_pwd']);
+
                         // check that admin accounts doesn't exist
                         $tmp = mysqli_num_rows(mysqli_query($dbTmp, "SELECT * FROM `" . $var['tbl_prefix'] . "users` WHERE login = 'admin'"));
                         if ($tmp === 0) {
                             $mysqli_result = mysqli_query(
                                 $dbTmp,
-                                "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `admin`, `gestionnaire`, `personal_folder`, `groupes_visibles`, `email`, `encrypted_psk`, `last_pw_change`, `name`, `lastname`, `can_create_root_folder`, `public_key`, `private_key`, `is_ready_for_usage`, `otp_provided`) VALUES ('1', 'admin', '" . bCrypt($var['admin_pwd'], '13') . "', '1', '0', '0', '0', '" . $var['admin_email'] . "', '', '" . time() . "', 'Change me', 'Change me', '1', 'none', 'none', '1', '1')"
+                                "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `admin`, `gestionnaire`, `personal_folder`, `groupes_visibles`, `email`, `encrypted_psk`, `last_pw_change`, `name`, `lastname`, `can_create_root_folder`, `public_key`, `private_key`, `is_ready_for_usage`, `otp_provided`, `created_at`) VALUES ('1', 'admin', '" . $hashedPassword . "', '1', '0', '0', '0', '" . $var['admin_email'] . "', '', '" . time() . "', 'Change me', 'Change me', '1', 'none', 'none', '1', '1', '" . time() . "')"
                             );
                         } else {
-                            $mysqli_result = mysqli_query($dbTmp, 'UPDATE `' . $var['tbl_prefix'] . "users` SET `pw` = '" . bCrypt($var['admin_pwd'], '13') . "' WHERE login = 'admin' AND id = '1'");
+                            $mysqli_result = mysqli_query($dbTmp, 'UPDATE `' . $var['tbl_prefix'] . "users` SET `pw` = '" . $hashedPassword . "' WHERE login = 'admin' AND id = '1'");
                         }
 
                         // check that API doesn't exist
@@ -862,7 +885,7 @@ $SETTINGS = array (';
                         if ($tmp === 0) {
                             $mysqli_result = mysqli_query(
                                 $dbTmp,
-                                "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `groupes_visibles`, `derniers`, `key_tempo`, `last_pw_change`, `last_pw`, `admin`, `fonction_id`, `groupes_interdits`, `last_connexion`, `gestionnaire`, `email`, `favourites`, `latest_items`, `personal_folder`, `is_ready_for_usage`, `otp_provided`) VALUES ('" . API_USER_ID . "', 'API', '', '', '', '', '', '', '1', '', '', '', '0', '', '', '', '0', '0', '1')"
+                                "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `groupes_visibles`, `derniers`, `key_tempo`, `last_pw_change`, `last_pw`, `admin`, `fonction_id`, `groupes_interdits`, `last_connexion`, `gestionnaire`, `email`, `favourites`, `latest_items`, `personal_folder`, `is_ready_for_usage`, `otp_provided`, `created_at`) VALUES ('" . API_USER_ID . "', 'API', '', '', '', '', '', '', '1', '', '', '', '0', '', '', '', '0', '0', '1', '" . time() . "')"
                             );
                         }
 
@@ -871,10 +894,10 @@ $SETTINGS = array (';
                         if ($tmp === 0) {
                             $mysqli_result = mysqli_query(
                                 $dbTmp,
-                                "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `groupes_visibles`, `derniers`, `key_tempo`, `last_pw_change`, `last_pw`, `admin`, `fonction_id`, `groupes_interdits`, `last_connexion`, `gestionnaire`, `email`, `favourites`, `latest_items`, `personal_folder`, `is_ready_for_usage`, `otp_provided`) VALUES ('" . OTV_USER_ID . "', 'OTV', '', '', '', '', '', '', '1', '', '', '', '0', '', '', '', '0', '0', '1')"
+                                "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `groupes_visibles`, `derniers`, `key_tempo`, `last_pw_change`, `last_pw`, `admin`, `fonction_id`, `groupes_interdits`, `last_connexion`, `gestionnaire`, `email`, `favourites`, `latest_items`, `personal_folder`, `is_ready_for_usage`, `otp_provided`, `created_at`) VALUES ('" . OTV_USER_ID . "', 'OTV', '', '', '', '', '', '', '1', '', '', '', '0', '', '', '', '0', '0', '1', '" . time() . "')"
                             );
                         }
-                    } elseif ($task === 'tags') {
+                    } elseif ($inputData['task'] === 'tags') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'tags` (
@@ -884,7 +907,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'log_system') {
+                    } elseif ($inputData['task'] === 'log_system') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'log_system` (
@@ -897,7 +920,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'files') {
+                    } elseif ($inputData['task'] === 'files') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "files` (
@@ -914,7 +937,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'cache') {
+                    } elseif ($inputData['task'] === 'cache') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "cache` (
@@ -936,7 +959,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'roles_title') {
+                    } elseif ($inputData['task'] === 'roles_title') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "roles_title` (
@@ -957,7 +980,7 @@ $SETTINGS = array (';
                                 "INSERT INTO `" . $var['tbl_prefix'] . "roles_title` (`id`, `title`, `allow_pw_change`, `complexity`, `creator_id`) VALUES (NULL, 'Default', '0', '48', '0')"
                             );
                         }
-                    } elseif ($task === 'roles_values') {
+                    } elseif ($inputData['task'] === 'roles_values') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "roles_values` (
@@ -968,7 +991,7 @@ $SETTINGS = array (';
                             KEY `role_id_idx` (`role_id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'kb') {
+                    } elseif ($inputData['task'] === 'kb') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "kb` (
@@ -981,7 +1004,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'kb_categories') {
+                    } elseif ($inputData['task'] === 'kb_categories') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'kb_categories` (
@@ -990,7 +1013,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'kb_items') {
+                    } elseif ($inputData['task'] === 'kb_items') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'kb_items` (
@@ -1000,7 +1023,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task == 'restriction_to_roles') {
+                    } elseif ($inputData['task'] == 'restriction_to_roles') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'restriction_to_roles` (
@@ -1010,7 +1033,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'languages') {
+                    } elseif ($inputData['task'] === 'languages') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'languages` (
@@ -1056,7 +1079,7 @@ $SETTINGS = array (';
                                 (24, 'estonian', 'Estonian', 'et', 'ee.png', 'et');"
                             );
                         }
-                    } elseif ($task === 'emails') {
+                    } elseif ($inputData['task'] === 'emails') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'emails` (
@@ -1069,7 +1092,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'automatic_del') {
+                    } elseif ($inputData['task'] === 'automatic_del') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'automatic_del` (
@@ -1080,7 +1103,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`item_id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'items_edition') {
+                    } elseif ($inputData['task'] === 'items_edition') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'items_edition` (
@@ -1092,7 +1115,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'categories') {
+                    } elseif ($inputData['task'] === 'categories') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "categories` (
@@ -1111,7 +1134,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'categories_items') {
+                    } elseif ($inputData['task'] === 'categories_items') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "categories_items` (
@@ -1125,7 +1148,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'categories_folders') {
+                    } elseif ($inputData['task'] === 'categories_folders') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'categories_folders` (
@@ -1135,7 +1158,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'api') {
+                    } elseif ($inputData['task'] === 'api') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "api` (
@@ -1155,7 +1178,7 @@ $SETTINGS = array (';
                             KEY `USER` (`user_id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'otv') {
+                    } elseif ($inputData['task'] === 'otv') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "otv` (
@@ -1172,7 +1195,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'suggestion') {
+                    } elseif ($inputData['task'] === 'suggestion') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "suggestion` (
@@ -1212,7 +1235,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'tokens') {
+                    } elseif ($inputData['task'] === 'tokens') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'tokens` (
@@ -1225,7 +1248,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'items_change') {
+                    } elseif ($inputData['task'] === 'items_change') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "items_change` (
@@ -1244,7 +1267,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`id`)
                             ) CHARSET=utf8;"
                         );
-                    } elseif ($task === 'templates') {
+                    } elseif ($inputData['task'] === 'templates') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             'CREATE TABLE IF NOT EXISTS `' . $var['tbl_prefix'] . 'templates` (
@@ -1254,7 +1277,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;'
                         );
-                    } elseif ($task === 'cache_tree') {
+                    } elseif ($inputData['task'] === 'cache_tree') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "cache_tree` (
@@ -1267,7 +1290,7 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;"
                         );
-                    } else if ($task === 'background_subtasks') {
+                    } else if ($inputData['task'] === 'background_subtasks') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "background_subtasks` (
@@ -1288,7 +1311,7 @@ $SETTINGS = array (';
                             'ALTER TABLE `' . $var['tbl_prefix'] . 'background_subtasks`
                                 ADD KEY `task_id_idx` (`task_id`);'
                         );
-                    } else if ($task === 'background_tasks') {
+                    } else if ($inputData['task'] === 'background_tasks') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "background_tasks` (
@@ -1306,21 +1329,22 @@ $SETTINGS = array (';
                             PRIMARY KEY (`increment_id`)
                             ) CHARSET=utf8;"
                         );
-                    } else if ($task === 'background_tasks_logs') {
+                    } else if ($inputData['task'] === 'background_tasks_logs') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "background_tasks_logs` (
                             `increment_id` int(12) NOT NULL AUTO_INCREMENT,
-                            `created_at` varchar(20) NOT NULL,
+                            `created_at` INT NOT NULL,
                             `job` varchar(50) NOT NULL,
                             `status` varchar(10) NOT NULL,
-                            `updated_at` varchar(20) DEFAULT NULL,
-                            `finished_at` varchar(20) DEFAULT NULL,
+                            `updated_at` INT DEFAULT NULL,
+                            `finished_at` INT DEFAULT NULL,
                             `treated_objects` varchar(20) DEFAULT NULL,
-                            PRIMARY KEY (`increment_id`)
+                            PRIMARY KEY (`increment_id`),
+                            INDEX idx_created_at (`created_at`)
                             ) CHARSET=utf8;"
                         );
-                    } else if ($task === 'ldap_groups_roles') {
+                    } else if ($inputData['task'] === 'ldap_groups_roles') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "ldap_groups_roles` (
@@ -1332,7 +1356,7 @@ $SETTINGS = array (';
                             KEY `ROLE` (`role_id`)
                             ) CHARSET=utf8;"
                         );
-                    } else if ($task === 'items_otp') {
+                    } else if ($inputData['task'] === 'items_otp') {
                         $mysqli_result = mysqli_query(
                             $dbTmp,
                             "CREATE TABLE IF NOT EXISTS `" . $var['tbl_prefix'] . "items_otp` (
@@ -1353,9 +1377,9 @@ $SETTINGS = array (';
                 }
                 // answer back
                 if ($mysqli_result) {
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '", "task" : "' . $task . '", "activity" : "' . $activity . '"}]';
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '", "task" : "' . $inputData['task'] . '", "activity" : "' . $inputData['activity'] . '"}]';
                 } else {
-                    echo '[{"error" : "' . addslashes(str_replace(array("'", "\n", "\r"), array('"', '', ''), mysqli_error($dbTmp))) . '", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '", "table" : "' . $task . '"}]';
+                    echo '[{"error" : "' . addslashes(str_replace(array("'", "\n", "\r"), array('"', '', ''), mysqli_error($dbTmp))) . '", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '", "table" : "' . $inputData['task'] . '"}]';
                 }
             } else {
                 echo '[{"error" : "' . addslashes(str_replace(array("'", "\n", "\r"), array('"', '', ''), mysqli_connect_error())) . '", "result" : "Failed", "multiple" : ""}]';
@@ -1368,21 +1392,12 @@ $SETTINGS = array (';
             break;
 
         case 'step_6':
-            //decrypt
-            require_once 'libs/aesctr.php'; // AES Counter Mode implementation
-            $activity = Encryption\Crypt\aesctr::decrypt($post_activity, 'cpm', 128);
-            $data_sent = Encryption\Crypt\aesctr::decrypt($post_data, 'cpm', 128);
-            $data_sent = json_decode($data_sent, true);
-            $task = Encryption\Crypt\aesctr::decrypt($post_task, 'cpm', 128);
-            $json = Encryption\Crypt\aesctr::decrypt($post_db, 'cpm', 128);
-            $db = json_decode($json, true);
-
             $dbTmp = mysqli_connect(
-                $db['db_host'],
-                $db['db_login'],
-                $db['db_pw'],
-                $db['db_bdd'],
-                $db['db_port']
+                $inputData['db']['db_host'],
+                $inputData['db']['db_login'],
+                $inputData['db']['db_pw'],
+                $inputData['db']['db_bdd'],
+                $inputData['db']['db_port']
             );
 
             // read install variables
@@ -1402,8 +1417,8 @@ $SETTINGS = array (';
 
             $events = '';
 
-            if ($activity === 'file') {
-                if ($task === 'settings.php') {
+            if ($inputData['activity'] === 'file') {
+                if ($inputData['task'] === 'settings.php') {
                     // first is to create teampass-seckey.txt
                     // 0- check if exists
                     $filesecure = generateRandomKey();
@@ -1412,7 +1427,7 @@ $SETTINGS = array (';
 
                     if (file_exists($filename_seckey)) {
                         if (!copy($filename_seckey, $filename_seckey . '.' . date('Y_m_d', mktime(0, 0, 0, (int) date('m'), (int) date('d'), (int) date('y'))))) {
-                            echo '[{"error" : "File `'.$filename_seckey.'` already exists and cannot be renamed. Please do it by yourself and click on button Launch.", "result":"", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                            echo '[{"error" : "File `'.$filename_seckey.'` already exists and cannot be renamed. Please do it by yourself and click on button Launch.", "result":"", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                             break;
                         } else {
                             unlink($filename);
@@ -1434,16 +1449,16 @@ $SETTINGS = array (';
 
                     if (file_exists($filename)) {
                         if (!copy($filename, $filename . '.' . date('Y_m_d', mktime(0, 0, 0, (int) date('m'), (int) date('d'), (int) date('y'))))) {
-                            echo '[{"error" : "Setting.php file already exists and cannot be renamed. Please do it by yourself and click on button Launch.", "result":"", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                            echo '[{"error" : "Setting.php file already exists and cannot be renamed. Please do it by yourself and click on button Launch.", "result":"", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                             break;
                         } else {
                             unlink($filename);
                         }
                     }
-                    //echo ">". $db['db_pw']." -- ".$new_salt." ;; ";
+                    //echo ">". $inputData['db']['db_pw']." -- ".$new_salt." ;; ";
                     // Encrypt the DB password
                     $encrypted_text = encryptFollowingDefuse(
-                        $db['db_pw'],
+                        $inputData['db']['db_pw'],
                         $new_salt
                     )['string'];
 
@@ -1454,12 +1469,12 @@ $SETTINGS = array (';
                         utf8_encode(
                             '<?php
 // DATABASE connexion parameters
-define("DB_HOST", "' . $db['db_host'] . '");
-define("DB_USER", "' . $db['db_login'] . '");
+define("DB_HOST", "' . $inputData['db']['db_host'] . '");
+define("DB_USER", "' . $inputData['db']['db_login'] . '");
 define("DB_PASSWD", "' . str_replace('$', '\$', $encrypted_text) . '");
-define("DB_NAME", "' . $db['db_bdd'] . '");
+define("DB_NAME", "' . $inputData['db']['db_bdd'] . '");
 define("DB_PREFIX", "' . $var['tbl_prefix'] . '");
-define("DB_PORT", "' . $db['db_port'] . '");
+define("DB_PORT", "' . $inputData['db']['db_port'] . '");
 define("DB_ENCODING", "' . $session_db_encoding . '");
 define("DB_SSL", false); // if DB over SSL then comment this line
 // if DB over SSL then uncomment the following lines
@@ -1501,16 +1516,16 @@ if (isset($_SESSION[\'settings\'][\'timezone\']) === true) {
 
                         $mysqli_result = mysqli_query(
                             $dbTmp,
-                            "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `groupes_visibles`, `derniers`, `key_tempo`, `last_pw_change`, `last_pw`, `admin`, `fonction_id`, `groupes_interdits`, `last_connexion`, `gestionnaire`, `email`, `favourites`, `latest_items`, `personal_folder`, `public_key`, `private_key`, `is_ready_for_usage`, `otp_provided`) VALUES ('" . TP_USER_ID . "', 'TP', '".$encrypted_pwd."', '', '', '', '', '', '1', '', '', '', '0', '', '', '', '0', '".$userKeys['public_key']."', '".$userKeys['private_key']."', '1', '1')"
+                            "INSERT INTO `" . $var['tbl_prefix'] . "users` (`id`, `login`, `pw`, `groupes_visibles`, `derniers`, `key_tempo`, `last_pw_change`, `last_pw`, `admin`, `fonction_id`, `groupes_interdits`, `last_connexion`, `gestionnaire`, `email`, `favourites`, `latest_items`, `personal_folder`, `public_key`, `private_key`, `is_ready_for_usage`, `otp_provided`, `created_at`) VALUES ('" . TP_USER_ID . "', 'TP', '".$encrypted_pwd."', '', '', '', '', '', '1', '', '', '', '0', '', '', '', '0', '".$userKeys['public_key']."', '".$userKeys['private_key']."', '1', '1', '" . time() . "')"
                         );
                     }
 
                     if ($result === false) {
-                        echo '[{"error" : "Setting.php file could not be created. Please check the path and the rights", "result":"", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                        echo '[{"error" : "Setting.php file could not be created. Please check the path and the rights", "result":"", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                     } else {
-                        echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                        echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                     }
-                } elseif ($task === 'security') {
+                } elseif ($inputData['task'] === 'security') {
                     // Sort out the file permissions
 
                     // is server Windows or Linux?
@@ -1528,17 +1543,17 @@ if (isset($_SESSION[\'settings\'][\'timezone\']) === true) {
                     }
                     $result = true;
                     if ($result === false) {
-                        echo '[{"error" : "Cannot change directory permissions - please fix manually", "result":"", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                        echo '[{"error" : "Cannot change directory permissions - please fix manually", "result":"", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                     } else {
-                        echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                        echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                     }
-                } elseif ($task === 'csrfp-token') {
+                } elseif ($inputData['task'] === 'csrfp-token') {
                     // update CSRFP TOKEN
                     $csrfp_file_sample = '../includes/libraries/csrfp/libs/csrfp.config.sample.php';
                     $csrfp_file = '../includes/libraries/csrfp/libs/csrfp.config.php';
                     if (file_exists($csrfp_file)) {
                         if (!copy($csrfp_file, $csrfp_file . '.' . date('Y_m_d', mktime(0, 0, 0, (int) date('m'), (int) date('d'), (int) date('y'))))) {
-                            echo '[{"error" : "csrfp.config.php file already exists and cannot be renamed. Please do it by yourself and click on button Launch.", "result":"", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                            echo '[{"error" : "csrfp.config.php file already exists and cannot be renamed. Please do it by yourself and click on button Launch.", "result":"", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                             break;
                         } else {
                             $events .= "The file $csrfp_file already exist. A copy has been created.<br />";
@@ -1548,21 +1563,21 @@ if (isset($_SESSION[\'settings\'][\'timezone\']) === true) {
                     copy($csrfp_file_sample, $csrfp_file); // make a copy of csrfp.config.sample file
                     $data = file_get_contents($csrfp_file);
                     $newdata = str_replace('"CSRFP_TOKEN" => ""', '"CSRFP_TOKEN" => "' . bin2hex(openssl_random_pseudo_bytes(25)) . '"', $data);
-                    $jsUrl = $data_sent['url_path'] . '/includes/libraries/csrfp/js/csrfprotector.js';
+                    $jsUrl = './includes/libraries/csrfp/js/csrfprotector.js';
                     $newdata = str_replace('"jsUrl" => ""', '"jsUrl" => "' . $jsUrl . '"', $newdata);
                     file_put_contents('../includes/libraries/csrfp/libs/csrfp.config.php', $newdata);
 
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 }
-            } elseif ($activity === 'install') {
-                if ($task === 'cleanup') {
+            } elseif ($inputData['activity'] === 'install') {
+                if ($inputData['task'] === 'cleanup') {
                     // Mark a tag to force Install stuff (folders, files and table) to be cleanup while first login
                     mysqli_query($dbTmp, "INSERT INTO `" . $var['tbl_prefix'] . "misc` (`type`, `intitule`, `valeur`) VALUES ('install', 'clear_install_folder', 'true')");
 
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
-                } elseif ($task === 'init') {
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
-                } elseif ($task === 'cronJob') {
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
+                } elseif ($inputData['task'] === 'init') {
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
+                } elseif ($inputData['task'] === 'cronJob') {
                     // Create cronjob
                     // get php location
                     require_once 'tp.functions.php';
@@ -1591,9 +1606,9 @@ if (isset($_SESSION[\'settings\'][\'timezone\']) === true) {
                             // do nothing
                         }
                     } else {
-                        echo '[{"error" : "Cannot find PHP binary location. Please add a cronjob manually (see documentation).", "result":"", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                        echo '[{"error" : "Cannot find PHP binary location. Please add a cronjob manually (see documentation).", "result":"", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                     }
-                    echo '[{"error" : "", "index" : "' . $post_index . '", "multiple" : "' . $post_multiple . '"}]';
+                    echo '[{"error" : "", "index" : "' . $inputData['index'] . '", "multiple" : "' . $inputData['multiple'] . '"}]';
                 }
             }
 

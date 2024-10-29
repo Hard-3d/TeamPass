@@ -48,7 +48,7 @@ $request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 $antiXss = new AntiXSS();
 
-// Load config if $SETTINGS not defined
+// Load config
 $configManager = new ConfigManager();
 $SETTINGS = $configManager->getAllSettings();
 
@@ -95,6 +95,9 @@ set_time_limit(0);
 $get_filename = (string) $antiXss->xss_clean($request->query->get('name'));
 $get_fileid = $antiXss->xss_clean($request->query->get('fileid'));
 $get_pathIsFiles = (string) $antiXss->xss_clean($request->query->get('pathIsFiles'));
+
+// Remove newline characters from the filename
+$get_filename = str_replace(array("\r", "\n"), '', $get_filename);
 
 // prepare Encryption class calls
 header('Content-disposition: attachment; filename=' . rawurldecode(basename($get_filename)));

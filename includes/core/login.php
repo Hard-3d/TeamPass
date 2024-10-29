@@ -31,8 +31,7 @@ declare(strict_types=1);
 
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 use TeampassClasses\Language\Language;
-use TeampassClasses\AzureAuthController\AzureAuthController;
-
+use TeampassClasses\OAuth2Controller\OAuth2Controller;
 // Automatic redirection
 $nextUrl = '';
 if (strpos($server['request_uri'], '?') > 0) {
@@ -45,28 +44,60 @@ if (strpos($server['request_uri'], '?') > 0) {
 $request = SymfonyRequest::createFromGlobals();
 $lang = new Language($session->get('user-language') ?? 'english');
 $get = [];
-$get['post_type'] = $request->query->get('post_type', '', FILTER_SANITIZE_SPECIAL_CHARS);
+$postType = $request->query->get('post_type', '');
+$postType = filter_var($postType, FILTER_SANITIZE_SPECIAL_CHARS);
+$get['post_type'] = $postType;
 if (isset($SETTINGS['duo']) === true && (int) $SETTINGS['duo'] === 1 && $get['post_type'] === 'duo' ) {
     $get['duo_state'] = $request->query->get('state');
     $get['duo_code'] = $request->query->get('duo_code');
 }
 
+// Manage case of Oauth2 login
 if (isset($_GET['code']) === true && isset($_GET['state']) === true && $get['post_type'] === 'oauth2') {
     $get['code'] = filter_var($_GET['code'], FILTER_SANITIZE_SPECIAL_CHARS);
     $get['state'] = filter_var($_GET['state'], FILTER_SANITIZE_SPECIAL_CHARS);
     $get['session_state'] = filter_var($_GET['session_state'], FILTER_SANITIZE_SPECIAL_CHARS);
 
-    error_log('---- CALLBACK ----');
+    if (WIP === true) error_log('---- OAUTH2 START ----');
 
     // Création d'une instance du contrôleur
-    $azureAuth = new AzureAuthController($SETTINGS);
+    $OAuth2 = new OAuth2Controller($SETTINGS);
 
     // Traitement de la réponse de callback Azure
-    $azureAuth->callback();
+    $userInfo = $OAuth2->callback();
+
+    if ($userInfo['error'] === false) {
+        // Si aucune erreur, stocker les informations utilisateur dans la session PHP
+
+        // Stocker les informations de l'utilisateur dans la session
+        $session->set('userOauth2Info', $userInfo['userOauth2Info']);
+
+        // Rediriger l'utilisateur vers la page d'accueil ou une page d'authentification réussie
+        header('Location: index.php');
+        exit;
+    } else {
+        // Gérer les erreurs
+        echo 'Erreur lors de la récupération des informations utilisateur : ' . $userInfo['message'];
+    };
+}
+
+// Azure step is done
+if (null !== $session->get('userOauth2Info') && empty($session->get('userOauth2Info')) === false && $session->get('userOauth2Info')['oauth2TokenUsed'] === false) {
+    // Azure step is done
+    // Check if user exists in Teampass
+    if (WIP === true) {
+        error_log('---- CALLBACK LOGIN ----');
+        //error_log('Info : ' . print_r($session->get('userOauth2Info'), true));
+    }
+
+    $session->set('user-login', strstr($session->get('userOauth2Info')['userPrincipalName'], '@', true));
+
+    // Encoder les valeurs de la session en JSON
+    $userOauth2InfoJson = json_encode($session->get('userOauth2Info'));
 }
 
 echo '
-<body class="hold-transition login-page">
+<body class="hold-transition login-page '.$theme_body.'">
 <div class="login-box">
     <div class="login-logo"><div style="margin:30px;">',
     isset($SETTINGS['custom_logo']) === true && empty($SETTINGS['custom_logo']) === false ?
@@ -218,7 +249,7 @@ $( window ).on( "load", function() {
         }
         updateLogonButton(seconds);
     },
-    1000
+    500
     );
 });
 </script>';
@@ -276,13 +307,13 @@ echo '
             </div>
         </div>';
         
-// SSO div
+// OAUTH2 div
 if (isKeyExistingAndEqual('oauth2_enabled', 1, $SETTINGS) === true) {
     echo '
         <hr class="mt-3 mb-3"/>
         <div class="row mb-2">
             <div class="col-12">
-                <button id="but_login_with_sso" class="btn btn-primary btn-block">' . $SETTINGS['oauth2_client_appname'] . '</button>
+                <button id="but_login_with_oauth2" class="btn btn-primary btn-block">' . $SETTINGS['oauth2_client_appname'] . '</button>
             </div>
         </div>';
 }
